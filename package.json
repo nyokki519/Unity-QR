@@ -1,0 +1,11 @@
+{
+  "name": "unity-check-in",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "test": "node tests/browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
