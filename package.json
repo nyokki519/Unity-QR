@@ -1,11 +1,37 @@
 {
   "name": "unity-check-in",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0",
   "scripts": {
-    "test": "node tests/browser.cjs"
+    "test": "npm run test:unit && npm run test:legacy && npm run test:ops",
+    "test:unit": "tsx --test tests/*.test.ts",
+    "test:legacy": "node tests/browser.cjs",
+    "test:ops": "tsx tests/ops-browser.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && esbuild server/decoder.ts --bundle --format=esm --platform=browser --target=safari15 --outfile=ops/decoder.js",
+    "start": "node dist/server/main.js",
+    "dev": "tsx server/main.ts",
+    "admin:create": "node dist/server/cli.js user",
+    "backup": "node dist/server/cli.js backup",
+    "backup:verify": "node dist/server/cli.js verify",
+    "pretest": "npm run build"
   },
   "devDependencies": {
-    "playwright": "1.62.1"
+    "@types/node": "^26.6.5",
+    "@types/pngjs": "^6.0.5",
+    "@types/qrcode": "^1.5.6",
+    "esbuild": "^0.28.2",
+    "playwright": "1.62.1",
+    "pngjs": "^7.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
   }
 }

@@ -1,5 +1,26 @@
 # Unity CHECK-IN
 
+## Unity QR 2.0 — Operations
+
+運営向けの新しい受付アプリを `/ops/` に追加しました。既存の会員デモとブラウザ内の履歴は変更していません。
+
+- サーバー認証、Admin / Staff / Viewer、イベント別アクセス。
+- 署名・有効期限付き参加者QR、iPhone向けカメラ読取、手動受付、二重受付防止。
+- 参加者検索、同名判別、当日登録、受付・参加取消、名前編集と監査履歴。
+- イベント作成・編集、受付人数、定員、受付時間帯。
+- Analyticsの取込・同期アダプター、PASS検証アダプター（実サービス未接続）。
+
+Node 24と永続SQLiteサーバーが必要です。GitHub Pagesの既存デモはそのまま公開されますが、新APIはPagesでは実行できません。
+
+```sh
+npm ci
+npm run build
+npm test
+```
+
+起動・本番設定・バックアップは [運用手順](docs/qr-v2-operations.md)、連携先の実装要件は [連携仕様](docs/qr-v2-integrations.md)、調査・制約は [監査記録](docs/qr-v2-audit.md) を参照してください。
+以下は保持している旧デモの説明です。旧デモのlocalStorageデータを本番参加者として自動移行しません。
+
 > 一生ものの仲間と、成長する。
 
 Unity community専用の MEMBERS ONLY digital member card × event check-in experience。
