@@ -1,0 +1,30 @@
+# Test service only. Creating this Blueprint provisions paid resources.
+# Keep existing GitHub Pages and all other Unity services unchanged.
+services:
+  - type: web
+    name: unity-qr-test
+    runtime: docker
+    repo: https://github.com/nyokki519/Unity-QR
+    branch: feature/unity-qr-v2
+    region: singapore
+    plan: starter
+    autoDeploy: false
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v2/health
+    numInstances: 1
+    disk:
+      name: unity-qr-test-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: QR_SIGNING_KEY
+        generateValue: true
+      - key: QR_DB_PATH
+        value: /data/qr.sqlite
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "4173"

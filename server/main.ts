@@ -6,7 +6,13 @@ import { secret } from "./security.js";
 import { deliverOutbox } from "./integrations.js";
 
 process.umask(0o077);
-const origin = new URL(process.env.QR_ORIGIN || "");
+// Render assigns the public HTTPS URL; explicit custom-domain configuration wins.
+const origin = new URL(
+  process.env.QR_ORIGIN ||
+    (process.env.RENDER === "true"
+      ? process.env.RENDER_EXTERNAL_URL || ""
+      : ""),
+);
 if (
   origin.username ||
   origin.password ||

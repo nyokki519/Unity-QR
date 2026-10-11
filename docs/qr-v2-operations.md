@@ -2,6 +2,8 @@
 
 ## Before production
 
+For a test deployment with fewer manual settings, follow [Render Blueprint setup](qr-v2-render.md). It provisions paid isolated resources; deployment and physical device verification remain required.
+
 The existing GitHub Pages site remains unchanged. GitHub Pages cannot run the new APIs. Deploy a Node **24** server behind HTTPS, with a private persistent SQLite volume. A stateless Vercel/serverless deployment is unsupported. No default Admin, LINE ID, PASS key or fake integration endpoint is provided.
 
 1. On the server, `npm ci`, `npm run build`.
