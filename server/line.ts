@@ -287,19 +287,12 @@ export class LineService {
       }
     }
     let events = this.events(action !== "register");
-    if (action !== "register") {
-      if (!identity)
-        return reply(
-          "まだ参加登録がありません。「参加希望」と送ってください。",
-        );
-      events = events.filter((ev) =>
-        this.db.row(
-          "SELECT status FROM registrations WHERE event_id=? AND participant_id=?",
-          ev.id,
-          identity.participant_id,
-        ),
-      );
+    const owned = this.db.rows(`SELECT DISTINCT e.*,c.participant_id ownedParticipant FROM form_claims c JOIN registrations r ON r.participant_id=c.participant_id JOIN events e ON e.id=r.event_id LEFT JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE c.subject_hash=? AND c.event_date=strftime('%Y-%m-%d',e.starts_at,'+9 hours') AND (m.event_id=e.id OR (m.event_id IS NULL AND e.source='analytics' AND e.external_id=c.external_event_id)) AND e.closes_at>? ORDER BY e.starts_at LIMIT 51`,subject,new Date().toISOString());
+    if (action !== 'register') {
+      events=events.filter(ev=>identity&&this.db.row('SELECT status FROM registrations WHERE event_id=? AND participant_id=?',ev.id,identity.participant_id));
+      if(!identity&&!owned.length)return reply('まだ参加登録がありません。「参加希望」と送ってください。');
     }
+    const byId=new Map(events.map(ev=>[ev.id,ev]));for(const ev of owned)if(!byId.has(ev.id))byId.set(ev.id,ev);events=[...byId.values()].sort((a,b)=>a.starts_at.localeCompare(b.starts_at));
     if (!events.length)
       return reply(
         "現在、受付中のイベントがありません。運営へお問い合わせください。",
@@ -312,6 +305,13 @@ export class LineService {
       return reply(
         "このイベントは申込受付を終了したか、選択が無効になっています。「参加希望」から確認してください。",
       );
+    if(action==='register'&&owned.some(row=>row.id===ev.id))action='ticket';
+    if(action!=='register') {
+      const ids=new Set(owned.filter(row=>row.id===ev.id).map(row=>row.ownedParticipant));
+      if(identity&&this.db.row('SELECT 1 FROM registrations WHERE event_id=? AND participant_id=?',ev.id,identity.participant_id))ids.add(identity.participant_id);
+      if(ids.size!==1)return reply('このイベントの参加登録が複数あります。運営へお問い合わせください。');
+      identity={participant_id:[...ids][0]};
+    }
     if (action === "cancel") {
       if (
         this.db.row(
@@ -479,6 +479,20 @@ export class LineService {
         token +
         "\nこのリンクは本人用です。他の方に転送しないでください。",
     );
+  }
+  issueParticipantLink(actor: Actor,eventId:string,participantId:string,key:string) {
+    eventId=text(eventId,120);participantId=text(participantId,120);
+    this.db.event(actor,eventId);
+    if(actor.role!=='Admin'&&actor.role!=='Staff')fail('forbidden',403);
+    const person=this.db.person(actor,eventId,participantId,true),event=this.db.event(actor,eventId);
+    if(person.status==='cancelled')fail('registration_cancelled',409);
+    if(Date.parse(event.closesAt)<=Date.now())fail('event_closed',410);
+    return this.db.mutate(actor,key,JSON.stringify(['participant-link',eventId,participantId]),()=>{
+      const token=randomBytes(32).toString('hex'),expiresAt=Date.parse(event.closesAt)+7*86400000;
+      this.db.run('INSERT INTO line_tickets VALUES(?,?,?,?)',digest(token),eventId,participantId,expiresAt);
+      this.db.audit(actor,'participant_link',eventId,participantId);
+      return {url:this.cfg.origin+'/ticket/#'+token,expiresAt};
+    });
   }
   ticket(token: string): {
     name: string;

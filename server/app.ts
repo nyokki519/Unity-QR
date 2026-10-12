@@ -207,6 +207,7 @@ export function createHandler(
           return json(res, {
             role: actor.role,
             events: actor.events,
+            features: {sheetReception:1},
             ...(cfg.pollIntervalMs
               ? { pollIntervalMs: cfg.pollIntervalMs }
               : {}),
@@ -257,6 +258,10 @@ export function createHandler(
               ),
             );
           }
+        }
+        if (path.pathname === '/api/v2/participant-link' && method === 'POST') {
+          const input=await body(req);
+          return json(res,line.issueParticipantLink(actor,input.eventId,input.participantId,key));
         }
         if (path.pathname === "/api/v2/ticket" && method === "GET") {
           const person = db.person(

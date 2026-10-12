@@ -54,6 +54,7 @@ function validateSnapshot(input: any) {
     pairs = new Set<string>();
   for (const e of input.events) {
     text(e.externalId, 120);
+    if (e.receptionId !== undefined) text(e.receptionId, 120);
     text(e.title);
     text(e.venue);
     const opens = Date.parse(e.opensAt),
@@ -74,6 +75,7 @@ function validateSnapshot(input: any) {
   }
   for (const p of input.participants) {
     text(p.externalId, 120);
+    if (p.claimHash !== undefined && !/^[a-f0-9]{64}$/.test(p.claimHash)) fail("invalid_snapshot");
     text(p.name, 60);
     if (personIds.has(p.externalId)) fail("invalid_snapshot");
     personIds.add(p.externalId);
@@ -103,53 +105,66 @@ export function importSnapshot(
     participants: snapshot.participants.length,
     registrations: snapshot.registrations.length,
     preview,
+    heldParticipants:0,
   };
   if (preview) return counts;
   return db.sql.transaction(() => {
-    for (const e of snapshot.events)
-      db.run(
-        "INSERT OR IGNORE INTO events(id,title,starts_at,opens_at,closes_at,venue,capacity,source,external_id) VALUES(?,?,?,?,?,?,?,'analytics',?)",
-        randomUUID(),
-        text(e.title),
-        new Date(e.startsAt).toISOString(),
-        new Date(e.opensAt).toISOString(),
-        new Date(e.closesAt).toISOString(),
-        text(e.venue),
-        e.capacity,
-        e.externalId,
-      );
-    for (const p of snapshot.participants)
-      db.run(
-        "INSERT OR IGNORE INTO participants(id,name,source,external_id,created_at) VALUES(?,?,'analytics',?,?)",
-        randomUUID(),
-        text(p.name, 60),
-        p.externalId,
-        new Date().toISOString(),
-      );
-    for (const r of snapshot.registrations) {
-      const event = db.row(
-        "SELECT id FROM events WHERE source='analytics' AND external_id=?",
-        r.eventExternalId,
-      );
-      const person = db.row(
-        "SELECT id FROM participants WHERE source='analytics' AND external_id=?",
-        r.participantExternalId,
-      );
-      db.run(
-        "INSERT OR IGNORE INTO registrations(event_id,participant_id) VALUES(?,?)",
-        event.id,
-        person.id,
-      );
+    let heldParticipants=0;
+    const eventRefs = new Map<string,string>(), personRefs = new Map<string,string>();
+    const registrationRefs=new Map<string,any[]>();
+    for(const r of snapshot.registrations)registrationRefs.set(r.participantExternalId,[...(registrationRefs.get(r.participantExternalId)||[]),r]);
+    for (const e of snapshot.events) {
+      if (e.receptionId) {
+        const existing = db.event(actor,e.receptionId);
+        // Existing event settings and history are never rewritten.
+        if (new Date(existing.startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}) !== new Date(e.startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})) fail('invalid_snapshot');
+        eventRefs.set(e.externalId, existing.id);
+      } else {
+        db.run("INSERT OR IGNORE INTO events(id,title,starts_at,opens_at,closes_at,venue,capacity,source,external_id) VALUES(?,?,?,?,?,?,?,'analytics',?)",randomUUID(),text(e.title),new Date(e.startsAt).toISOString(),new Date(e.opensAt).toISOString(),new Date(e.closesAt).toISOString(),text(e.venue),e.capacity,e.externalId);
+        eventRefs.set(e.externalId,db.row("SELECT id FROM events WHERE source='analytics' AND external_id=?",e.externalId).id);
+      }
     }
+    for (const p of snapshot.participants) {
+      const claim = p.claimHash ? db.row('SELECT * FROM form_claims WHERE token_hash=?',p.claimHash) : null;
+      const refs = registrationRefs.get(p.externalId)||[];
+      if (p.claimHash && refs.length !== 1) fail('invalid_snapshot');
+      if(p.claimHash&&!claim){heldParticipants++;continue;}
+      if(!claim) {
+        // A name is only a collision warning, never proof of identity.
+        const collision=refs.some((r:any)=>{
+          const event=db.event(actor,eventRefs.get(r.eventExternalId)!);
+          const day=new Date(event.startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
+          return db.row('SELECT 1 FROM form_claims WHERE event_date=? AND name=? LIMIT 1',day,p.name) || db.row("SELECT 1 FROM registrations r JOIN participants p ON p.id=r.participant_id WHERE r.event_id=? AND p.name=? AND (p.source IS NULL OR p.source!='analytics') LIMIT 1",event.id,p.name);
+        });
+        if(collision){heldParticipants++;continue;}
+      }
+
+      if (claim) {
+        const event = db.event(actor,eventRefs.get(refs[0].eventExternalId)!);
+        const day = new Date(event.startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
+        if (claim.event_date !== day || claim.name !== p.name) fail('claim_conflict',409);
+        const mapped=db.row('SELECT event_id FROM form_event_mappings WHERE external_event_id=? AND event_date=?',claim.external_event_id,day);
+        const direct=db.row("SELECT id FROM events WHERE source='analytics' AND external_id=?",claim.external_event_id);
+        if ((mapped && mapped.event_id!==event.id)||(!mapped&&direct&&direct.id!==event.id)) fail('claim_event_mapping_conflict',409);
+        db.run('INSERT OR IGNORE INTO form_event_mappings VALUES(?,?,?)',claim.external_event_id,event.id,day);
+      }
+      let person=claim?.participant_id ? db.row('SELECT id FROM participants WHERE id=?',claim.participant_id) : db.row("SELECT id FROM participants WHERE source='analytics' AND external_id=?",p.externalId);
+      if (!person) {
+        const id=randomUUID();db.run("INSERT INTO participants(id,name,source,external_id,created_at) VALUES(?,?,'analytics',?,?)",id,text(p.name,60),p.externalId,new Date().toISOString());person={id};
+      }
+      if(claim&&!claim.participant_id)db.run('UPDATE form_claims SET participant_id=? WHERE token_hash=?',person.id,p.claimHash);
+      personRefs.set(p.externalId,person.id);
+    }
+    for (const r of snapshot.registrations) if(personRefs.has(r.participantExternalId)) db.run('INSERT OR IGNORE INTO registrations(event_id,participant_id) VALUES(?,?)',eventRefs.get(r.eventExternalId),personRefs.get(r.participantExternalId));
     db.audit(actor, "analytics_import", null, null);
     db.run(
       "INSERT INTO sync_runs(kind,status,detail,created_at) VALUES(?,?,?,?)",
       "import",
       "success",
-      JSON.stringify(counts),
+      JSON.stringify({...counts,heldParticipants}),
       new Date().toISOString(),
     );
-    return counts;
+    return {...counts,heldParticipants};
   });
 }
 export async function fetchSnapshot(

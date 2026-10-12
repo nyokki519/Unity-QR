@@ -244,7 +244,7 @@ function peopleHTML() {
     ? list
         .map(
           (p) =>
-            `<article class="person" data-event="${esc(state.eventId)}"><div class="personInfo"><span class="pill ${esc(p.status)}">${{ checkedIn: "受付済み", waiting: "未受付", cancelled: "キャンセル" }[p.status]}</span><h3>${esc(p.name)}</h3><small>ID ${esc(p.id.slice(0, 8))}${p.memberId ? ` · PASS ${esc(p.memberId)}` : ""}${p.lineLinked ? " · LINE連携" : ""}${Number.isInteger(p.visits) ? ` · 来場 ${p.visits}回` : ""}${p.status === "checkedIn" ? ` · ${date(p.checkedInAt)}` : ""}</small>${p.nameMatches > 1 ? '<span class="duplicate">同名の参加者がいます。IDで確認してください。</span>' : ""}</div><div class="actions">${write() && p.status === "waiting" ? `<button class="primary" data-action="checkin" data-person="${esc(p.id)}">受付する</button>` : ""}${write() && p.status !== "cancelled" ? `<button class="secondary" data-action="ticket" data-person="${esc(p.id)}">QRを表示</button>` : ""}${admin() ? `<button class="textButton" data-action="rename" data-person="${esc(p.id)}">編集</button>${p.status === "checkedIn" ? `<button class="danger" data-action="undo" data-person="${esc(p.id)}">受付取消</button>` : p.status === "waiting" ? `<button class="textButton" data-action="cancel" data-person="${esc(p.id)}">参加取消</button>` : `<button class="secondary" data-action="restore" data-person="${esc(p.id)}">取消を解除</button>`}` : ""}</div></article>`,
+            `<article class="person" data-event="${esc(state.eventId)}"><div class="personInfo"><span class="pill ${esc(p.status)}">${{ checkedIn: "受付済み", waiting: "未受付", cancelled: "キャンセル" }[p.status]}</span><h3>${esc(p.name)}</h3><small>ID ${esc(p.id.slice(0, 8))}${p.memberId ? ` · PASS ${esc(p.memberId)}` : ""}${p.lineLinked ? " · LINE連携" : ""}${Number.isInteger(p.visits) ? ` · 来場 ${p.visits}回` : ""}${p.status === "checkedIn" ? ` · ${date(p.checkedInAt)}` : ""}</small>${p.nameMatches > 1 ? '<span class="duplicate">同名の参加者がいます。IDで確認してください。</span>' : ""}</div><div class="actions">${write() && p.status === "waiting" ? `<button class="primary" data-action="checkin" data-person="${esc(p.id)}">受付する</button>` : ""}${write() && p.status !== "cancelled" ? `<button class="secondary" data-action="ticket" data-person="${esc(p.id)}">QRを表示</button><button class="secondary" data-action="ticketLink" data-person="${esc(p.id)}">QRリンクを発行</button>` : ""}${admin() ? `<button class="textButton" data-action="rename" data-person="${esc(p.id)}">編集</button>${p.status === "checkedIn" ? `<button class="danger" data-action="undo" data-person="${esc(p.id)}">受付取消</button>` : p.status === "waiting" ? `<button class="textButton" data-action="cancel" data-person="${esc(p.id)}">参加取消</button>` : `<button class="secondary" data-action="restore" data-person="${esc(p.id)}">取消を解除</button>`}` : ""}</div></article>`,
         )
         .join("")
     : '<div class="empty">条件に一致する参加者はいません。</div>';
@@ -729,6 +729,11 @@ document.addEventListener("click", async (e) => {
           ? "このイベントは受付済みです。"
           : "受付を確定しました。",
       );
+    }
+    if(action === "ticketLink") {
+      const result=await api("participant-link",{eventId:renderedEvent,participantId:id});
+      if(renderedEvent!==state.eventId||actionRevision!==revision||!state.actor)return;
+      dialog("参加者専用QRリンク",`<p class="hint">本人にだけ送ってください。開催前はイベント情報を表示し、受付時間内にQRを表示します。</p><label>専用リンク<input readonly value="${esc(result.url)}"></label><a class="secondary" href="${esc(result.url)}" target="_blank" rel="noopener noreferrer">参加者QRを開く</a>`);
     }
     if (action === "ticket") {
       const ticket = await api(

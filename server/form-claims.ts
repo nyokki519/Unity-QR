@@ -174,17 +174,15 @@ export class FormClaims {
         "SELECT participant_id FROM line_identities WHERE subject_hash=?",
         subject,
       );
-      if (
-        claim.participant_id &&
-        identity?.participant_id !== claim.participant_id
-      )
-        fail("claim_used", 409);
+      // A server-imported accepted claim may already have its own participant.
+      // Ownership is enforced above by subject_hash, never by display name.
+      const participantId = claim.participant_id || identity?.participant_id;
       const existing =
-        identity &&
+        participantId &&
         this.db.row(
           "SELECT status FROM registrations WHERE event_id=? AND participant_id=?",
           ev.id,
-          identity.participant_id,
+          participantId,
         );
       if (existing?.status === "cancelled") fail("registration_cancelled", 409);
       if (
@@ -195,7 +193,7 @@ export class FormClaims {
         ).n >= ev.capacity
       )
         fail("capacity_reached", 409);
-      if (!identity) {
+      if (!participantId) {
         const id = randomUUID();
         this.db.run(
           "INSERT INTO participants(id,name,source,created_at) VALUES(?,?,?,?)",
@@ -212,22 +210,24 @@ export class FormClaims {
         );
         identity = { participant_id: id };
       }
+      const resolvedId = participantId || identity.participant_id;
+      if (!identity) this.db.run('INSERT INTO line_identities VALUES(?,?,?)',subject,resolvedId,new Date().toISOString());
       this.db.run(
         "INSERT OR IGNORE INTO registrations VALUES(?,?,'planned')",
         ev.id,
-        identity.participant_id,
+        resolvedId,
       );
       this.db.run(
         "UPDATE form_claims SET subject_hash=?,participant_id=? WHERE token_hash=?",
         subject,
-        identity.participant_id,
+        resolvedId,
         claim.token_hash,
       );
-      if (!claim.participant_id)
-        this.db.audit(system, "form_claim", ev.id, identity.participant_id);
+      if (!claim.subject_hash)
+        this.db.audit(system, "form_claim", ev.id, resolvedId);
       return {
         event: this.db.event(system, ev.id),
-        person: this.db.person(system, ev.id, identity.participant_id),
+        person: this.db.person(system, ev.id, resolvedId),
       };
     });
   }
