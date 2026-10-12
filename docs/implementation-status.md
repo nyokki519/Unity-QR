@@ -52,3 +52,9 @@ Plan: `docs/qr-v2-plan.md`. Spec: `docs/qr-v2-design.md`.
 - External/manual: Google owner must install supplied bound script, paste dedicated shared key in Script Properties and run setup once; it obtains actual entry automatically and preserves growth triggers. No code/secret fabricated from LINE IDs. Real accepted-submit, LINE app-switch and live reception require owner test event; existing Forms without metadata or manual entry fallback to prior flow. No real messages sent by development tests.
 
 - Delivery: QR implementation35ce082 pushed, PR https://github.com/nyokki519/Unity-QR/pull/5 targets feature/line-auto-registration. Unity_S PR#4 at048ed06 targets main. Both code CI runs succeeded. Production frontend/backend/Form configuration remain unchanged by this task; owner rollout still required.
+
+### Rollout continuation — 2026-10-12
+
+- User requested continued execution. Existing Unity_S public HTML/Form/script references verified; Pages source confirmed main. PR#4 merged only after CI/review safeguards; merge852be461b7d3736120b7436b53f10e8158c74d0a deployed successfully at https://nyokki519.github.io/Unity_S/ . New HTML/helper fetched and verified. Main verification CI passed. No production Form answers submitted/changed.
+- QR PR#5 latest checks successful. Its new Form code remains un-deployed to Workers. Cloudflare API token/account binding, Google credentials and form shared key are absent from this Codex environment; no credential values inferred from chat or copied from the user's Mac.
+- Frontend safely retains existing LINE flow until real QR config is enabled by the bound Google Form setup. Remaining owner-side steps: retrieve QR branch on Mac, verified cloud:update, cloud:form-setup, paste clipboard shared key into existing Form Script Properties and execute supplied setup script; dedicated test registration and LINE app-switch confirmation. Keep one step per user reply as requested.
