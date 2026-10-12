@@ -55,6 +55,7 @@ function validateSnapshot(input: any) {
   for (const e of input.events) {
     text(e.externalId, 120);
     if (e.receptionId !== undefined) text(e.receptionId, 120);
+    if(e.aliases!==undefined&&(!Array.isArray(e.aliases)||e.aliases.length>100||new Set(e.aliases).size!==e.aliases.length||e.aliases.some((a:any)=>typeof a!=='string'||!/^sheet-event:[a-f0-9]{64}$/.test(a))))fail('invalid_snapshot');
     text(e.title);
     text(e.venue);
     const opens = Date.parse(e.opensAt),
@@ -122,6 +123,17 @@ export function importSnapshot(
       } else {
         db.run("INSERT OR IGNORE INTO events(id,title,starts_at,opens_at,closes_at,venue,capacity,source,external_id) VALUES(?,?,?,?,?,?,?,'analytics',?)",randomUUID(),text(e.title),new Date(e.startsAt).toISOString(),new Date(e.opensAt).toISOString(),new Date(e.closesAt).toISOString(),text(e.venue),e.capacity,e.externalId);
         eventRefs.set(e.externalId,db.row("SELECT id FROM events WHERE source='analytics' AND external_id=?",e.externalId).id);
+      }
+    }
+    for(const e of snapshot.events) {
+      const targetId=eventRefs.get(e.externalId)!,day=new Date(e.startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
+      if(new Date(db.event(actor,targetId).startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})!==day)fail('claim_event_date_mismatch',409);
+      const aliases=new Set<string>([...(e.aliases||[]),...(/^sheet-event:[a-f0-9]{64}$/.test(e.externalId)?[e.externalId]:[])]);
+      for(const alias of aliases) {
+        const mapped=db.row('SELECT event_id FROM form_event_mappings WHERE external_event_id=? AND event_date=?',alias,day),direct=db.row("SELECT id FROM events WHERE source='analytics' AND external_id=?",alias);
+        if((mapped&&mapped.event_id!==targetId)||(direct&&direct.id!==targetId))fail('claim_event_mapping_conflict',409);
+        db.run('INSERT OR IGNORE INTO form_event_mappings VALUES(?,?,?)',alias,targetId,day);
+        if(!mapped)db.audit(actor,'sheet_event_map',targetId,null);
       }
     }
     for (const p of snapshot.participants) {

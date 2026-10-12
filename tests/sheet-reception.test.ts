@@ -62,3 +62,33 @@ test('a later distinct accepted receipt cannot claim an application already boun
  const result=importSnapshot(db,admin,snapshot(second));assert.equal(result.heldParticipants,1);assert.equal(db.row('SELECT participant_id FROM form_claims WHERE token_hash=?',digest(second)).participant_id,null);assert.equal(db.row('SELECT count(*) n FROM participants').n,1);assert.equal(claims.redeem(first,'c'.repeat(64)).person.id,owner.person.id);
  }finally{db.close();}
 });
+test('source event keys map reused manual reception safely even when the sheet has no claim column',()=>{
+ const {db,event,person}=fixture();try{
+ const key='sheet-event:'+digest(JSON.stringify([japanDate(event.startsAt),'test'])),ev=db.createEvent(admin,{...event,capacity:7},randomUUID());
+ const raw='a'.repeat(64),claims=new FormClaims(db);claims.accept({claimHash:digest(raw),receiptHash:digest('receipt'),name:person.name,eventId:key,eventName:'Test',eventDate:japanDate(event.startsAt)});
+ importSnapshot(db,admin,{version:1,events:[{...event,externalId:key,receptionId:ev.id}],participants:[],registrations:[]});
+ const redeemed=claims.redeem(raw,'b'.repeat(64));assert.equal(redeemed.event.id,ev.id);assert.equal(db.events(admin).length,1);assert.equal(db.event(admin,ev.id).capacity,7);
+ const second=db.createEvent(admin,event,randomUUID());assert.throws(()=>importSnapshot(db,admin,{version:1,events:[{...event,externalId:key,receptionId:second.id}],participants:[],registrations:[]}),/claim_event_mapping_conflict/);
+ assert.equal(db.row('SELECT event_id FROM form_event_mappings WHERE external_event_id=?',key).event_id,ev.id);
+ }finally{db.close();}
+});
+test('a late Form acceptance never guesses an anonymous imported namesake or creates duplicate attendance registration',()=>{
+ const {db,event,person}=fixture();try{
+ const claims=new FormClaims(db),raw='a'.repeat(64),claimHash=digest(raw),snapshot={version:1,events:[event],participants:[person],registrations:[{eventExternalId:event.externalId,participantExternalId:person.externalId}]};
+ importSnapshot(db,admin,snapshot);const ev=db.events(admin)[0],original=db.participants(admin,ev.id)[0];
+ claims.accept({claimHash,receiptHash:digest('receipt'),name:person.name,eventId:event.externalId,eventName:event.title,eventDate:japanDate(event.startsAt)});
+ assert.throws(()=>claims.redeem(raw,'b'.repeat(64)),/claim_registration_pending/);assert.equal(db.summary(admin,ev.id).total,1);
+ importSnapshot(db,admin,{...snapshot,participants:[{...person,claimHash}]});assert.equal(claims.redeem(raw,'b'.repeat(64)).person.id,original.id);assert.equal(db.summary(admin,ev.id).total,1);
+ }finally{db.close();}
+});
+test('source alias variants issue individual LINE QR for the same event, expose scoped aliases, and reject remapping',()=>{
+ const {db,event,person}=fixture();try{
+ const one='sheet-event:'+digest('one'),two='sheet-event:'+digest('two'),otherDay='sheet-event:'+digest('day');
+ const claims=new FormClaims(db),raw='a'.repeat(64);claims.accept({claimHash:digest(raw),receiptHash:digest('receipt'),name:person.name,eventId:two,eventName:'Test variant',eventDate:japanDate(event.startsAt)});
+ const snapshot={version:1,events:[{...event,externalId:one,aliases:[two,otherDay]}],participants:[],registrations:[]};importSnapshot(db,admin,snapshot);importSnapshot(db,admin,snapshot);
+ const ev=db.events(admin)[0];assert.equal(ev.aliases.length,3);assert.equal(claims.redeem(raw,'b'.repeat(64)).event.id,ev.id);assert.equal(db.events(admin).length,1);
+ const staff:any={id:'staff',role:'Staff',events:[]};assert.equal(db.events(staff).length,0);assert.throws(()=>importSnapshot(db,staff,snapshot),/forbidden/);
+ assert.throws(()=>importSnapshot(db,admin,{...snapshot,events:[{...event,externalId:'new-event',aliases:[two]}]}),/claim_event_mapping_conflict/);assert.equal(db.events(admin).length,1);
+ assert.throws(()=>importSnapshot(db,admin,{...snapshot,events:[{...event,aliases:['invalid']}]},true),/invalid_snapshot/);
+ }finally{db.close();}
+});

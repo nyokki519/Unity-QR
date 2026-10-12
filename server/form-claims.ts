@@ -177,6 +177,8 @@ export class FormClaims {
       // A server-imported accepted claim may already have its own participant.
       // Ownership is enforced above by subject_hash, never by display name.
       const participantId = claim.participant_id || identity?.participant_id;
+      if(!claim.participant_id&&this.db.row("SELECT 1 FROM participants p JOIN registrations r ON r.participant_id=p.id WHERE r.event_id=? AND p.name=? AND p.source='analytics' AND p.id<>? LIMIT 1",ev.id,claim.name,participantId||''))
+        fail('claim_registration_pending',409);
       const existing =
         participantId &&
         this.db.row(

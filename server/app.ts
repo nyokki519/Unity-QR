@@ -207,7 +207,7 @@ export function createHandler(
           return json(res, {
             role: actor.role,
             events: actor.events,
-            features: {sheetReception:1},
+            features: {sheetReception:1,similarEventAliases:1},
             ...(cfg.pollIntervalMs
               ? { pollIntervalMs: cfg.pollIntervalMs }
               : {}),

@@ -99,6 +99,7 @@ export class ReceptionStore {
       .filter((r) => actor.role === "Admin" || actor.events.includes(r.id))
       .map((r) => ({
         ...this.event(actor, r.id),
+        aliases: this.rows('SELECT external_event_id FROM form_event_mappings WHERE event_id=? ORDER BY external_event_id',r.id).map(row=>row.external_event_id),
         ...this.summary(actor, r.id),
       }));
   }
