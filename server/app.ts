@@ -26,12 +26,20 @@ import {
   type IntegrationConfig,
 } from "./integrations.js";
 
-export type AppConfig = IntegrationConfig & {
-  origin: string;
-  signingKey: string;
-  root: string;
-  pollIntervalMs?: number;
-};
+import { LineService, type LineConfig } from "./line.js";
+import {
+  fetchAnalyticsOperatorEvents,
+  importAnalyticsOperatorEvents,
+} from "./analytics-events.js";
+export type AppConfig = IntegrationConfig &
+  Partial<LineConfig> & {
+    analyticsOperatorOrigin?: string;
+    analyticsOperatorPassword?: string;
+    origin: string;
+    signingKey: string;
+    root: string;
+    pollIntervalMs?: number;
+  };
 const cookieName = "unity_qr_session";
 function cookie(request: IncomingMessage) {
   return (
@@ -104,6 +112,28 @@ export function createHandler(
     try {
       const path = new URL(req.url || "/", cfg.origin),
         method = req.method || "GET";
+      const line = new LineService(db, cfg);
+      if (path.pathname === "/api/v2/line/webhook" && method === "POST") {
+        let size = 0;
+        const chunks: Buffer[] = [];
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > 256 * 1024) fail("request_too_large", 413);
+          chunks.push(chunk);
+        }
+        return json(
+          res,
+          await line.webhook(
+            Buffer.concat(chunks),
+            req.headers["x-line-signature"],
+          ),
+        );
+      }
+      if (path.pathname === "/api/v2/line/ticket" && method === "GET") {
+        const auth = req.headers.authorization || "";
+        if (!/^Bearer [a-f0-9]{64}$/.test(auth)) fail("ticket_not_found", 404);
+        return json(res, await line.publicTicket(auth.slice(7)));
+      }
       if (path.pathname === "/api/v2/health")
         return json(res, { service: "unity-qr", version: 2 });
       if (path.pathname.startsWith("/api/")) {
@@ -317,7 +347,11 @@ export function createHandler(
         if (path.pathname === "/api/v2/settings" && method === "GET") {
           db.admin(actor);
           return json(res, {
-            version: 2,
+            version: 3,
+            line: line.settings(actor),
+            analyticsEventsConnected: !!(
+              cfg.analyticsOperatorOrigin && cfg.analyticsOperatorPassword
+            ),
             passConnected: !!(cfg.passVerifyUrl && cfg.passToken),
             analyticsImportConnected: !!(
               cfg.analyticsSnapshotUrl && cfg.analyticsToken
@@ -338,6 +372,39 @@ export function createHandler(
                   .map((e) => e.event_id),
               })),
           });
+        }
+        if (path.pathname === "/api/v2/line/events" && method === "POST") {
+          db.admin(actor);
+          return json(res, line.configure(actor, await body(req), key));
+        }
+        if (path.pathname === "/api/v2/analytics-events" && method === "POST") {
+          db.admin(actor);
+          const input = await body(req);
+          if (
+            typeof input.venue !== "string" ||
+            !Number.isInteger(input.capacity)
+          )
+            fail("analytics_defaults_required");
+          const events =
+            input.preview === false
+              ? input.events
+              : await fetchAnalyticsOperatorEvents({
+                  origin: cfg.analyticsOperatorOrigin,
+                  operatorPassword: cfg.analyticsOperatorPassword,
+                });
+          const result = importAnalyticsOperatorEvents(
+            db,
+            actor,
+            events,
+            { venue: input.venue, capacity: input.capacity },
+            input.preview !== false,
+          );
+          return json(
+            res,
+            input.preview !== false
+              ? { preview: result, snapshot: events }
+              : result,
+          );
         }
         if (path.pathname === "/api/v2/users" && method === "POST") {
           db.admin(actor);
@@ -408,6 +475,9 @@ export function createHandler(
         "/index.html": ["index.html", "text/html; charset=utf-8"],
         "/app.js": ["app.js", "text/javascript"],
         "/style.css": ["style.css", "text/css"],
+        "/ticket/": ["public/ticket.html", "text/html; charset=utf-8"],
+        "/ticket/ticket.js": ["public/ticket.js", "text/javascript"],
+        "/ticket/ticket.css": ["public/ticket.css", "text/css"],
         "/ops": ["ops/index.html", "text/html; charset=utf-8"],
         "/ops/": ["ops/index.html", "text/html; charset=utf-8"],
         "/ops/index.html": ["ops/index.html", "text/html; charset=utf-8"],
@@ -418,7 +488,10 @@ export function createHandler(
       };
       const file = allowed[path.pathname];
       if (!file) fail("not_found", 404);
-      if (path.pathname.startsWith("/ops"))
+      if (
+        path.pathname.startsWith("/ops") ||
+        path.pathname.startsWith("/ticket/")
+      )
         res.setHeader(
           "Content-Security-Policy",
           "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",

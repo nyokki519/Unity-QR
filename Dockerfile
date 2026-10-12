@@ -20,6 +20,7 @@ RUN --mount=type=secret,id=proxy_ca \
     npm ci --omit=dev && mkdir /data && chown node:node /data
 COPY --from=build --chown=node:node /app/dist/server ./dist/server
 COPY --from=build --chown=node:node /app/ops ./ops
+COPY --chown=node:node public ./public
 COPY --chown=node:node index.html app.js style.css ./
 USER node
 EXPOSE 4173

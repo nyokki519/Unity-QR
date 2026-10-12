@@ -162,7 +162,7 @@ export async function fetchSnapshot(
     await readJSON(
       await fetcher(secureURL(cfg.analyticsSnapshotUrl), {
         headers: { Authorization: `Bearer ${cfg.analyticsToken}` },
-        redirect: "error",
+        redirect: "manual",
         signal: AbortSignal.timeout(15000),
         cache: "no-store",
       }),
@@ -198,7 +198,7 @@ export async function deliverOutbox(
             "Idempotency-Key": item.id,
           },
           body: item.payload,
-          redirect: "error",
+          redirect: "manual",
           signal: AbortSignal.timeout(10000),
           cache: "no-store",
         });
@@ -249,7 +249,7 @@ export async function verifyPass(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ version: 1, ticket, eventId }),
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(10000),
       cache: "no-store",
     }),

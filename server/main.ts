@@ -40,6 +40,11 @@ const config: AppConfig = {
   analyticsSnapshotUrl: process.env.ANALYTICS_SNAPSHOT_URL,
   analyticsDeliveryUrl: process.env.ANALYTICS_CHECKIN_URL,
   analyticsToken: process.env.ANALYTICS_API_TOKEN,
+  lineChannelId: process.env.LINE_CHANNEL_ID,
+  lineChannelSecret: process.env.LINE_CHANNEL_SECRET,
+  lineAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+  analyticsOperatorOrigin: process.env.ANALYTICS_OPERATOR_ORIGIN,
+  analyticsOperatorPassword: process.env.ANALYTICS_OPERATOR_PASSWORD,
   passVerifyUrl: process.env.PASS_VERIFY_URL,
   passToken: process.env.PASS_API_TOKEN,
 };

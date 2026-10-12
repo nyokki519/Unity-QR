@@ -21,6 +21,11 @@ export interface CloudEnv {
   QR_SIGNING_KEY?: string;
   QR_SETUP_TOKEN?: string;
   QR_ORIGIN?: string;
+  LINE_CHANNEL_ID?: string;
+  LINE_CHANNEL_SECRET?: string;
+  LINE_CHANNEL_ACCESS_TOKEN?: string;
+  ANALYTICS_OPERATOR_ORIGIN?: string;
+  ANALYTICS_OPERATOR_PASSWORD?: string;
   ANALYTICS_SNAPSHOT_URL?: string;
   ANALYTICS_CHECKIN_URL?: string;
   ANALYTICS_API_TOKEN?: string;
@@ -69,6 +74,7 @@ export class QRReception {
     private env: CloudEnv,
   ) {
     this.db = new ReceptionStore(new DurableSqlDriver(ctx.storage));
+    this.db.run("UPDATE line_webhooks SET status='failed',error_code='processing_interrupted' WHERE status='processing'");
     this.db.sql.exec(
       "CREATE TABLE IF NOT EXISTS _qr_login_attempts(ip TEXT PRIMARY KEY,count INTEGER NOT NULL,expires INTEGER NOT NULL)",
     );
@@ -112,6 +118,12 @@ export class QRReception {
       origin: url.origin,
       signingKey: secret(this.env.QR_SIGNING_KEY),
       root: "",
+      lineSchedule: (work) => this.ctx.waitUntil(work),
+      lineChannelId: this.env.LINE_CHANNEL_ID,
+      lineChannelSecret: this.env.LINE_CHANNEL_SECRET,
+      lineAccessToken: this.env.LINE_CHANNEL_ACCESS_TOKEN,
+      analyticsOperatorOrigin: this.env.ANALYTICS_OPERATOR_ORIGIN,
+      analyticsOperatorPassword: this.env.ANALYTICS_OPERATOR_PASSWORD,
       pollIntervalMs: 30000,
       analyticsSnapshotUrl: this.env.ANALYTICS_SNAPSHOT_URL,
       analyticsDeliveryUrl: this.env.ANALYTICS_CHECKIN_URL,

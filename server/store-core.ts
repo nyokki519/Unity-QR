@@ -15,7 +15,7 @@ export class ReceptionStore {
     this.sql.close();
   }
   migrate() {
-    if (this.sql.getVersion() > 2) fail("unsupported_schema", 503);
+    if (this.sql.getVersion() > 3) fail("unsupported_schema", 503);
     this.sql.transaction(() => {
       this.sql.exec(`
       CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('Admin','Staff','Viewer')), enabled INTEGER NOT NULL DEFAULT 1);
@@ -32,6 +32,12 @@ export class ReceptionStore {
       CREATE INDEX IF NOT EXISTS idx_audit_event ON audit(event_id,id);
       CREATE INDEX IF NOT EXISTS idx_registration_participant ON registrations(participant_id);
       CREATE INDEX IF NOT EXISTS idx_participants_name ON participants(name);
+      CREATE TABLE IF NOT EXISTS line_identities(subject_hash TEXT PRIMARY KEY NOT NULL,participant_id TEXT NOT NULL UNIQUE REFERENCES participants(id),created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS line_event_settings(event_id TEXT PRIMARY KEY NOT NULL REFERENCES events(id),enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),opens_at TEXT NOT NULL,closes_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS line_tickets(token_hash TEXT PRIMARY KEY NOT NULL,event_id TEXT NOT NULL REFERENCES events(id),participant_id TEXT NOT NULL REFERENCES participants(id),expires_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS idx_line_ticket_expiry ON line_tickets(expires_at);
+      CREATE TABLE IF NOT EXISTS line_conversations(subject_hash TEXT PRIMARY KEY NOT NULL,event_id TEXT NOT NULL REFERENCES events(id),expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS line_webhooks(id TEXT PRIMARY KEY NOT NULL,status TEXT NOT NULL CHECK(status IN ('processing','sent','failed','unknown','ignored')),error_code TEXT,created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS _qr_imports(fingerprint TEXT PRIMARY KEY,counts TEXT NOT NULL,imported_at TEXT NOT NULL);
       `);
       if (
@@ -55,7 +61,7 @@ export class ReceptionStore {
       this.sql.exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_sequence ON outbox(sequence)",
       );
-      this.sql.setVersion(2);
+      this.sql.setVersion(3);
     });
   }
   row(sql: string, ...values: any[]): any {
@@ -272,7 +278,9 @@ export class ReceptionStore {
     this.event(actor, eventId);
     const list = this.rows(
       `SELECT p.id,p.name,p.member_id memberId,r.status registrationStatus,a.state,a.checked_in_at checkedInAt,
-      (SELECT COUNT(*) FROM participants d JOIN registrations dr ON dr.participant_id=d.id WHERE dr.event_id=r.event_id AND d.name=p.name) nameMatches
+      (SELECT COUNT(*) FROM participants d JOIN registrations dr ON dr.participant_id=d.id WHERE dr.event_id=r.event_id AND d.name=p.name) nameMatches,
+      EXISTS(SELECT 1 FROM line_identities li WHERE li.participant_id=p.id) lineLinked,
+      (SELECT count(*) FROM attendance visits WHERE visits.participant_id=p.id AND visits.state='in') visits
       FROM registrations r JOIN participants p ON p.id=r.participant_id LEFT JOIN attendance a ON a.event_id=r.event_id AND a.participant_id=p.id WHERE r.event_id=?`,
       eventId,
     );

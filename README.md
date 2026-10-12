@@ -1,5 +1,11 @@
 # Unity CHECK-IN
 
+## 公式LINEから参加登録・個別QRの自動返信
+
+「参加希望」のDM → イベント選択・参加登録 → 個別QRページをReply APIで返信 → 当日スタッフ受付。LINE未接続でも既存受付を維持します。設定・本番更新・バックアップ手順は [LINE運用手順](docs/qr-line-operations.md)、Analyticsの運営イベント取込は [連携の範囲](docs/qr-line-analytics.md) を参照してください。実際の認証情報を設定するまでは未接続です。
+
+`npm run cloud:update` は本番バックアップを取得・復元検証してから既存Workerを更新します。`npm run cloud:line-setup` は認証情報を非表示入力でCloudflare secretsへ登録します。初回移行と更新は別のコマンドです。
+
 ## Unity QR 2.0 — Operations
 
 運営向けの新しい受付アプリを `/ops/` に追加しました。既存の会員デモとブラウザ内の履歴は変更していません。

@@ -56,6 +56,12 @@ const errors = {
   pass_disconnected:
     "Unity PASSは未接続です。通常の参加者受付を利用してください。",
   analytics_disconnected: "Analyticsは未接続です。設定済みの連携先が必要です。",
+  analytics_operator_disconnected:
+    "Analytics運営出席との接続設定がありません。",
+  analytics_operator_failed:
+    "Analytics運営出席に接続できません。設定を確認してください。",
+  analytics_defaults_required: "取込イベントの会場・定員を入力してください。",
+  invalid_line_event: "LINE申込期間を確認してください。",
   integration_failed: "連携先に接続できません。受付記録は保存されています。",
   invalid_snapshot: "取込ファイルの形式が正しくありません。",
   invalid_input: "入力内容を確認してください。",
@@ -238,7 +244,7 @@ function peopleHTML() {
     ? list
         .map(
           (p) =>
-            `<article class="person" data-event="${esc(state.eventId)}"><div class="personInfo"><span class="pill ${esc(p.status)}">${{ checkedIn: "受付済み", waiting: "未受付", cancelled: "キャンセル" }[p.status]}</span><h3>${esc(p.name)}</h3><small>ID ${esc(p.id.slice(0, 8))}${p.memberId ? ` · PASS ${esc(p.memberId)}` : ""}${p.status === "checkedIn" ? ` · ${date(p.checkedInAt)}` : ""}</small>${p.nameMatches > 1 ? '<span class="duplicate">同名の参加者がいます。IDで確認してください。</span>' : ""}</div><div class="actions">${write() && p.status === "waiting" ? `<button class="primary" data-action="checkin" data-person="${esc(p.id)}">受付する</button>` : ""}${write() && p.status !== "cancelled" ? `<button class="secondary" data-action="ticket" data-person="${esc(p.id)}">QRを表示</button>` : ""}${admin() ? `<button class="textButton" data-action="rename" data-person="${esc(p.id)}">編集</button>${p.status === "checkedIn" ? `<button class="danger" data-action="undo" data-person="${esc(p.id)}">受付取消</button>` : p.status === "waiting" ? `<button class="textButton" data-action="cancel" data-person="${esc(p.id)}">参加取消</button>` : `<button class="secondary" data-action="restore" data-person="${esc(p.id)}">取消を解除</button>`}` : ""}</div></article>`,
+            `<article class="person" data-event="${esc(state.eventId)}"><div class="personInfo"><span class="pill ${esc(p.status)}">${{ checkedIn: "受付済み", waiting: "未受付", cancelled: "キャンセル" }[p.status]}</span><h3>${esc(p.name)}</h3><small>ID ${esc(p.id.slice(0, 8))}${p.memberId ? ` · PASS ${esc(p.memberId)}` : ""}${p.lineLinked ? " · LINE連携" : ""}${Number.isInteger(p.visits) ? ` · 来場 ${p.visits}回` : ""}${p.status === "checkedIn" ? ` · ${date(p.checkedInAt)}` : ""}</small>${p.nameMatches > 1 ? '<span class="duplicate">同名の参加者がいます。IDで確認してください。</span>' : ""}</div><div class="actions">${write() && p.status === "waiting" ? `<button class="primary" data-action="checkin" data-person="${esc(p.id)}">受付する</button>` : ""}${write() && p.status !== "cancelled" ? `<button class="secondary" data-action="ticket" data-person="${esc(p.id)}">QRを表示</button>` : ""}${admin() ? `<button class="textButton" data-action="rename" data-person="${esc(p.id)}">編集</button>${p.status === "checkedIn" ? `<button class="danger" data-action="undo" data-person="${esc(p.id)}">受付取消</button>` : p.status === "waiting" ? `<button class="textButton" data-action="cancel" data-person="${esc(p.id)}">参加取消</button>` : `<button class="secondary" data-action="restore" data-person="${esc(p.id)}">取消を解除</button>`}` : ""}</div></article>`,
         )
         .join("")
     : '<div class="empty">条件に一致する参加者はいません。</div>';
@@ -280,13 +286,38 @@ function eventsHTML() {
     `<div class="eventList">${state.events.map((e) => `<article class="eventCard"><p class="eyebrow">${Date.parse(e.closesAt) < Date.now() ? "PAST EVENT" : "UPCOMING EVENT"}</p><h2>${esc(e.title)}</h2><span class="pill">${e.checkedIn}名 受付済み</span><div class="eventMeta"><span>開催<strong>${date(e.startsAt)}</strong></span><span>会場<strong>${esc(e.venue)}</strong></span><span>受付開始<strong>${date(e.opensAt)}</strong></span><span>受付終了<strong>${date(e.closesAt)}</strong></span><span>定員<strong>${e.capacity}名</strong></span>${e.externalId ? `<span>外部ID<strong>${esc(e.externalId)}</strong></span>` : ""}</div><div class="actions"><button class="primary" data-action="selectEvent" data-event="${esc(e.id)}">このイベントを選択</button>${admin() ? `<button class="secondary" data-action="editEvent" data-event="${esc(e.id)}">編集</button>` : ""}</div></article>`).join("") || empty("イベントがありません。")}</div>`
   );
 }
+function lineSettings(s) {
+  const line = s.line;
+  if (!line) return "";
+  return `<section class="panel"><h2>公式LINE・自動受付</h2><p class="hint">${line.configured && line.channelIdConfigured ? "認証設定あり・LINEでの接続確認が必要です。" : "未接続です。必要な設定をサーバーへ安全に登録してください。"}<br>「参加希望」への返信で、個別QRリンクを案内します。Push配信は行いません。</p>${
+    state.events
+      .map((e) => {
+        const config = line.events?.find((c) => c.eventId === e.id);
+        return `<div class="userRow"><div><strong>${esc(e.title)}</strong><small>${config?.enabled ? "LINE申込受付 有効" : "LINE申込受付 無効"}${config?.enabled ? ` · ${date(config.opensAt)} — ${date(config.closesAt)}` : ""}</small></div><button class="secondary" data-action="lineEvent" data-event="${esc(e.id)}">申込設定</button></div>`;
+      })
+      .join("") || '<p class="hint">先にイベントを作成してください。</p>'
+  }<h3>最近のLINE処理</h3><ul class="syncLog">${
+    (line.deliveries || [])
+      .slice(0, 20)
+      .map(
+        (d) =>
+          `<li>${date(d.created_at)} · ${{ sent: "返信済み", failed: "失敗", unknown: "結果不明", pending: "処理待ち", processing: "処理中", ignored: "対象外" }[d.status] || esc(d.status)}${d.error_code ? ` · ${esc(d.error_code)}` : ""}</li>`,
+      )
+      .join("") || "<li>まだ処理の記録はありません。</li>"
+  }</ul><p class="hint">返信が届かない場合は、参加者から「QR再発行」と送ってもらってください。秘密情報・LINEユーザーIDは表示しません。</p></section>`;
+}
 function settingsHTML() {
   const s = state.settings;
   return (
     pageHead("設定・管理", "運営アクセスと連携状態を管理します。") +
     (s
-      ? `<div class="settingsGrid"><section class="panel"><h2>サービス連携</h2>${[
+      ? `<div class="settingsGrid">${lineSettings(s)}<section class="panel"><h2>サービス連携</h2>${[
           ["Unity PASS", "会員証QRのサーバー検証", s.passConnected],
+          [
+            "Analytics 運営出席イベント",
+            "イベント一覧の安全な取込",
+            s.analyticsEventsConnected,
+          ],
           [
             "Analytics 取込",
             "イベント・参加予定者の取込",
@@ -304,7 +335,7 @@ function settingsHTML() {
           )
           .join(
             "",
-          )}<p class="hint">未接続でも通常のQR受付は利用できます。接続情報・秘密鍵はサーバー環境設定で管理します。</p><div class="actions"><button class="secondary" data-action="importFile">JSONを確認して取込</button>${s.analyticsImportConnected ? '<button class="secondary" data-action="importRemote">Analyticsから取込</button>' : ""}<button class="secondary" data-action="sync">同期を再試行</button></div><p class="hint">未送信 ${s.sync.pending}件 / 失敗 ${s.sync.failed}件。未接続の記録は保持されます。</p><ul class="syncLog">${s.sync.runs.map((r) => `<li>${date(r.created_at)} · ${esc(r.kind)} · ${esc(r.status)} · ${esc(r.detail)}</li>`).join("") || "<li>まだ同期の記録はありません。</li>"}</ul></section><section class="panel"><div class="panelHead"><h2>スタッフ・権限</h2><button class="secondary" data-action="newUser">ユーザーを追加</button></div>${s.users.map((u) => `<div class="userRow"><div><strong>${esc(u.username)}</strong><small>${esc(u.role)} · ${u.enabled ? "有効" : "無効"} · ${u.eventIds.length}イベント割当</small></div>${u.enabled ? `<button class="textButton" data-action="disableUser" data-user="${esc(u.id)}">無効化</button>` : ""}</div>`).join("")}<p class="hint">Admin：全機能。Staff：割当イベントの受付・参加者確認。Viewer：割当イベントの閲覧のみ。</p></section><section class="panel"><h2>データ保護</h2><p class="hint">受付は永続DBに保存します。バックアップと復元確認はサーバーの専用コマンドで実施してください。旧デモの履歴やAnalyticsの申込・PV集計は書き換えません。</p><a href="../" class="secondary">既存の会員デモを見る</a></section></div>`
+          )}<p class="hint">未接続でも通常のQR受付は利用できます。接続情報・秘密鍵はサーバー環境設定で管理します。</p><div class="actions"><button class="secondary" data-action="importFile">JSONを確認して取込</button>${s.analyticsImportConnected ? '<button class="secondary" data-action="importRemote">Analyticsから取込</button>' : ""}${s.analyticsEventsConnected ? '<button class="secondary" data-action="analyticsEvents">運営出席イベントを取込</button>' : ""}<button class="secondary" data-action="sync">同期を再試行</button></div><p class="hint">未送信 ${s.sync.pending}件 / 失敗 ${s.sync.failed}件。未接続の記録は保持されます。</p><ul class="syncLog">${s.sync.runs.map((r) => `<li>${date(r.created_at)} · ${esc(r.kind)} · ${esc(r.status)} · ${esc(r.detail)}</li>`).join("") || "<li>まだ同期の記録はありません。</li>"}</ul></section><section class="panel"><div class="panelHead"><h2>スタッフ・権限</h2><button class="secondary" data-action="newUser">ユーザーを追加</button></div>${s.users.map((u) => `<div class="userRow"><div><strong>${esc(u.username)}</strong><small>${esc(u.role)} · ${u.enabled ? "有効" : "無効"} · ${u.eventIds.length}イベント割当</small></div>${u.enabled ? `<button class="textButton" data-action="disableUser" data-user="${esc(u.id)}">無効化</button>` : ""}</div>`).join("")}<p class="hint">Admin：全機能。Staff：割当イベントの受付・参加者確認。Viewer：割当イベントの閲覧のみ。</p></section><section class="panel"><h2>データ保護</h2><p class="hint">受付は永続DBに保存します。バックアップと復元確認はサーバーの専用コマンドで実施してください。旧デモの履歴やAnalyticsの申込・PV集計は書き換えません。</p><a href="../" class="secondary">既存の会員デモを見る</a></section></div>`
       : '<p class="empty">設定を読み込んでいます。</p>')
   );
 }
@@ -489,6 +520,46 @@ document.addEventListener("submit", async (e) => {
       await api("participants", { eventId: form.dataset.event, ...values });
       await afterMutation("参加者を登録しました。");
     }
+    if (form.id === "analyticsEventsForm") {
+      const defaults = {
+        venue: values.venue,
+        capacity: Number(values.capacity),
+      };
+      const result = await api("analytics-events", {
+        ...defaults,
+        preview: true,
+      });
+      dialog(
+        "運営出席イベント取込の確認",
+        `<p>イベント ${Number(result.preview.events)}件 / 対象外 ${Number(result.preview.skipped || 0)}件</p><p class="hint">会場：${esc(defaults.venue)} · 定員：${defaults.capacity}名<br>Analyticsに会場・定員がないため、この値を使用します。既存の受付・イベントは上書きしません。</p><button class="primary full" id="confirmAnalyticsEvents">この内容で取込</button>`,
+      );
+      document.querySelector("#confirmAnalyticsEvents").onclick =
+        async function () {
+          this.disabled = true;
+          try {
+            const imported = await api("analytics-events", {
+              ...defaults,
+              preview: false,
+              events: result.snapshot,
+            });
+            await afterMutation(
+              `運営出席イベント取込：${Number(imported.events || 0)}件確認 / 対象外 ${Number(imported.skipped || 0)}件`,
+            );
+          } catch (error) {
+            notify(error.message, true);
+            this.disabled = false;
+          }
+        };
+    }
+    if (form.id === "lineEventForm") {
+      await api("line/events", {
+        eventId: form.dataset.event,
+        enabled: new FormData(form).has("enabled"),
+        opensAt: new Date(values.opensAt).toISOString(),
+        closesAt: new Date(values.closesAt).toISOString(),
+      });
+      await afterMutation("LINE申込設定を保存しました。");
+    }
     if (form.id === "eventForm") {
       const data = {
         ...values,
@@ -579,6 +650,23 @@ document.addEventListener("click", async (e) => {
         "当日参加を登録",
         `<form id="walkinForm" data-event="${esc(state.eventId)}"><label>参加者名<input name="name" required maxlength="60" autocomplete="name"></label>${admin() ? '<label>共通会員ID（確認済みの場合のみ）<input name="memberId" maxlength="100" autocomplete="off"></label>' : ""}<p class="hint">同じ名前でも別の参加者として登録します。本人確認後に受付してください。</p><button class="primary full">登録する</button></form>`,
       );
+    if (action === "lineEvent" && admin()) {
+      const selected = state.events.find((e) => e.id === button.dataset.event);
+      const config = state.settings?.line?.events?.find(
+        (e) => e.eventId === selected?.id,
+      );
+      if (!selected) return;
+      dialog(
+        "LINE申込受付の設定",
+        `<form id="lineEventForm" data-event="${esc(selected.id)}"><p>${esc(selected.title)}</p><label><input type="checkbox" name="enabled" ${config?.enabled ? "checked" : ""}> LINEから参加申込を受け付ける</label><label>申込開始<input name="opensAt" type="datetime-local" required value="${localDate(config?.opensAt || Date.now())}"></label><label>申込終了<input name="closesAt" type="datetime-local" required value="${localDate(config?.closesAt || selected.closesAt)}"></label><p class="hint">申込期間は、当日のQR受付時間とは別に設定します。イベント名・日時を確認して有効にしてください。</p><button class="primary full">設定を保存</button></form>`,
+      );
+    }
+    if (action === "analyticsEvents" && admin()) {
+      dialog(
+        "運営出席イベントを取込",
+        '<form id="analyticsEventsForm"><label>取込イベントの会場<input name="venue" required maxlength="80" placeholder="実際の会場名"></label><label>取込イベントの定員<input name="capacity" type="number" min="1" max="10000" required></label><p class="hint">Analyticsのイベントには会場・定員がないため、運営が確認した値を入力してください。取込対象を確認してから確定します。</p><button class="primary full">取込内容を確認</button></form>',
+      );
+    }
     if (action === "newEvent" || action === "editEvent")
       eventForm(button.dataset.event);
     if (action === "selectEvent") {

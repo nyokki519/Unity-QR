@@ -1,7 +1,7 @@
 import { ReceptionStore } from "./store-core.js";
 import { digest, fail } from "./security.js";
 
-const columns: Record<string, string[]> = {
+const legacyColumns: Record<string, string[]> = {
   users: ["id", "username", "password_hash", "role", "enabled"],
   events: [
     "id",
@@ -54,17 +54,28 @@ const columns: Record<string, string[]> = {
   ],
   sync_runs: ["id", "kind", "status", "detail", "created_at"],
 };
+const columns: Record<string, string[]> = {
+  ...legacyColumns,
+  line_identities: ["subject_hash", "participant_id", "created_at"],
+  line_event_settings: ["event_id", "enabled", "opens_at", "closes_at"],
+  line_tickets: ["token_hash", "event_id", "participant_id", "expires_at"],
+  line_conversations: ["subject_hash", "event_id", "expires_at"],
+  line_webhooks: ["id", "status", "error_code", "created_at"],
+};
+function snapshotColumns(version: number) {
+  return version === 2 ? legacyColumns : columns;
+}
 export type OwnedSnapshot = {
   application: "unity-qr";
   version: 1;
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   tables: Record<string, Record<string, any>[]>;
 };
 export function exportSnapshot(db: ReceptionStore): OwnedSnapshot {
   return db.sql.transaction(() => ({
     application: "unity-qr",
     version: 1,
-    schemaVersion: 2,
+    schemaVersion: 3,
     tables: Object.fromEntries(
       Object.keys(columns).map((name) => [
         name,
@@ -79,6 +90,7 @@ const nullableColumns: Record<string, string[]> = {
   participants: ["member_id", "source", "external_id"],
   audit: [...nullable],
   outbox: ["last_error"],
+  line_webhooks: ["error_code"],
 };
 function validText(value: unknown, max = 1024, allowEmpty = false) {
   return (
@@ -104,6 +116,25 @@ function parsedObject(value: unknown): Record<string, any> {
   fail("invalid_migration");
 }
 function validateRow(table: string, row: Record<string, any>) {
+  if (table.startsWith("line_")) {
+    for (const key of ["subject_hash", "token_hash"])
+      if (key in row && !/^[a-f0-9]{64}$/.test(row[key]))
+        fail("invalid_migration");
+    if (
+      table === "line_event_settings" &&
+      (![0, 1].includes(row.enabled) ||
+        Date.parse(row.opens_at) >= Date.parse(row.closes_at))
+    )
+      fail("invalid_migration");
+    if (
+      table === "line_webhooks" &&
+      !["processing", "sent", "failed", "unknown", "ignored"].includes(
+        row.status,
+      )
+    )
+      fail("invalid_migration");
+  }
+
   for (const [key, value] of Object.entries(row)) {
     if (value === null && nullableColumns[table]?.includes(key)) continue;
     if (key === "id" && ["audit", "sync_runs"].includes(table)) {
@@ -111,9 +142,14 @@ function validateRow(table: string, row: Record<string, any>) {
     } else if (key === "id" || key.endsWith("_id")) {
       if (!validText(value, 128)) fail("invalid_migration");
     } else if (
-      ["enabled", "capacity", "attempts", "next_attempt", "sequence"].includes(
-        key,
-      )
+      [
+        "enabled",
+        "capacity",
+        "attempts",
+        "next_attempt",
+        "sequence",
+        "expires_at",
+      ].includes(key)
     ) {
       if (
         !Number.isSafeInteger(value) ||
@@ -175,16 +211,18 @@ function validate(input: any): asserts input is OwnedSnapshot {
     !input ||
     input.application !== "unity-qr" ||
     input.version !== 1 ||
-    input.schemaVersion !== 2 ||
+    ![2, 3].includes(input.schemaVersion) ||
     !input.tables ||
     typeof input.tables !== "object" ||
     Array.isArray(input.tables) ||
     Object.keys(input.tables).sort().join() !==
-      Object.keys(columns).sort().join()
+      Object.keys(snapshotColumns(input.schemaVersion)).sort().join()
   )
     fail("invalid_migration");
   let total = 0;
-  for (const [table, keys] of Object.entries(columns)) {
+  for (const [table, keys] of Object.entries(
+    snapshotColumns(input.schemaVersion),
+  )) {
     const rows = input.tables[table];
     if (!Array.isArray(rows)) fail("invalid_migration");
     total += rows.length;
@@ -240,7 +278,9 @@ export function importOwnedSnapshot(db: ReceptionStore, input: unknown) {
     )
       fail("destination_not_empty", 409);
     const counts: Record<string, number> = {};
-    for (const [table, keys] of Object.entries(columns)) {
+    for (const [table, keys] of Object.entries(
+      snapshotColumns(input.schemaVersion),
+    )) {
       for (const row of input.tables[table])
         db.run(
           `INSERT INTO ${table}(${keys.join(",")}) VALUES(${keys.map(() => "?").join(",")})`,
