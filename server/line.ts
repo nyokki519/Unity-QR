@@ -208,10 +208,11 @@ export class LineService {
           Date.parse(accepted.event.closesAt) + 7 * 86400000,
         );
         return reply(
+          "参加申込を確認できました。\nイベント詳細は後ほど共有します。\n\n" +
           accepted.event.title +
             "\n参加者：" +
             accepted.person.name +
-            "\n申込情報を確認しました。受付でQRを提示してください。\n" +
+            "\n\n受付で以下のページのQRをご提示ください。\n" +
             this.cfg.origin +
             "/ticket/#" +
             token +
@@ -464,6 +465,7 @@ export class LineService {
       identity.participant_id,
     );
     return reply(
+      "参加申込を確認できました。\nイベント詳細は後ほど共有します。\n\n" +
       ev.title +
         "\n" +
         new Date(ev.starts_at).toLocaleString("ja-JP", {
