@@ -54,7 +54,7 @@ const legacyColumns: Record<string, string[]> = {
   ],
   sync_runs: ["id", "kind", "status", "detail", "created_at"],
 };
-const columns: Record<string, string[]> = {
+const lineColumns: Record<string, string[]> = {
   ...legacyColumns,
   line_identities: ["subject_hash", "participant_id", "created_at"],
   line_event_settings: ["event_id", "enabled", "opens_at", "closes_at"],
@@ -62,20 +62,36 @@ const columns: Record<string, string[]> = {
   line_conversations: ["subject_hash", "event_id", "expires_at"],
   line_webhooks: ["id", "status", "error_code", "created_at"],
 };
+const columns: Record<string, string[]> = {
+  ...lineColumns,
+  form_config: ["id", "entry", "enabled"],
+  form_event_mappings: ["external_event_id", "event_id", "event_date"],
+  form_claims: [
+    "token_hash",
+    "receipt_hash",
+    "external_event_id",
+    "event_date",
+    "name",
+    "event_name",
+    "created_at",
+    "participant_id",
+    "subject_hash",
+  ],
+};
 function snapshotColumns(version: number) {
-  return version === 2 ? legacyColumns : columns;
+  return version === 2 ? legacyColumns : version === 3 ? lineColumns : columns;
 }
 export type OwnedSnapshot = {
   application: "unity-qr";
   version: 1;
-  schemaVersion: 2 | 3;
+  schemaVersion: 2 | 3 | 4;
   tables: Record<string, Record<string, any>[]>;
 };
 export function exportSnapshot(db: ReceptionStore): OwnedSnapshot {
   return db.sql.transaction(() => ({
     application: "unity-qr",
     version: 1,
-    schemaVersion: 3,
+    schemaVersion: 4,
     tables: Object.fromEntries(
       Object.keys(columns).map((name) => [
         name,
@@ -91,6 +107,7 @@ const nullableColumns: Record<string, string[]> = {
   audit: [...nullable],
   outbox: ["last_error"],
   line_webhooks: ["error_code"],
+  form_claims: ["participant_id", "subject_hash"],
 };
 function validText(value: unknown, max = 1024, allowEmpty = false) {
   return (
@@ -116,6 +133,32 @@ function parsedObject(value: unknown): Record<string, any> {
   fail("invalid_migration");
 }
 function validateRow(table: string, row: Record<string, any>) {
+  if (table.startsWith("form_")) {
+    for (const key of ["token_hash", "receipt_hash", "subject_hash"])
+      if (key in row && row[key] !== null && !/^[a-f0-9]{64}$/.test(row[key]))
+        fail("invalid_migration");
+    if (
+      "event_date" in row &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(row.event_date) ||
+        !Number.isFinite(Date.parse(row.event_date + "T00:00:00Z")) ||
+        new Date(row.event_date + "T00:00:00Z").toISOString().slice(0, 10) !==
+          row.event_date)
+    )
+      fail("invalid_migration");
+    if (
+      table === "form_config" &&
+      (row.id !== 1 ||
+        !/^entry\.\d{1,20}$/.test(row.entry) ||
+        ![0, 1].includes(row.enabled))
+    )
+      fail("invalid_migration");
+    if (
+      table === "form_claims" &&
+      (row.participant_id === null) !== (row.subject_hash === null)
+    )
+      fail("invalid_migration");
+  }
+
   if (table.startsWith("line_")) {
     for (const key of ["subject_hash", "token_hash"])
       if (key in row && !/^[a-f0-9]{64}$/.test(row[key]))
@@ -137,7 +180,7 @@ function validateRow(table: string, row: Record<string, any>) {
 
   for (const [key, value] of Object.entries(row)) {
     if (value === null && nullableColumns[table]?.includes(key)) continue;
-    if (key === "id" && ["audit", "sync_runs"].includes(table)) {
+    if (key === "id" && ["audit", "sync_runs", "form_config"].includes(table)) {
       if (!Number.isSafeInteger(value) || value < 1) fail("invalid_migration");
     } else if (key === "id" || key.endsWith("_id")) {
       if (!validText(value, 128)) fail("invalid_migration");
@@ -164,11 +207,13 @@ function validateRow(table: string, row: Record<string, any>) {
     } else if (
       !validText(
         value,
-        key === "name" || key === "username"
-          ? 60
-          : key === "reason"
-            ? 240
-            : 1024,
+        key === "name"
+          ? 100
+          : key === "username"
+            ? 60
+            : key === "reason"
+              ? 240
+              : 1024,
         key === "reason",
       )
     )
@@ -211,7 +256,7 @@ function validate(input: any): asserts input is OwnedSnapshot {
     !input ||
     input.application !== "unity-qr" ||
     input.version !== 1 ||
-    ![2, 3].includes(input.schemaVersion) ||
+    ![2, 3, 4].includes(input.schemaVersion) ||
     !input.tables ||
     typeof input.tables !== "object" ||
     Array.isArray(input.tables) ||

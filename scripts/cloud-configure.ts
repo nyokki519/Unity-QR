@@ -1,3 +1,12 @@
+import { randomBytes } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  chmodSync,
+} from "node:fs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -23,7 +32,30 @@ async function main() {
   );
   const analytics = process.argv.includes("--analytics");
   const values: Record<string, string> = {};
-  if (analytics) {
+  const form = process.argv.includes("--form");
+  if (form) {
+    process.umask(0o077);
+    mkdirSync("data", { recursive: true, mode: 0o700 });
+    const path = "data/form-secret.key";
+    const key = existsSync(path)
+      ? readFileSync(path, "utf8").trim()
+      : randomBytes(32).toString("hex");
+    if (!/^[a-f0-9]{64}$/.test(key))
+      throw new Error("既存フォーム連携キーの形式を確認してください。");
+    if (!existsSync(path))
+      writeFileSync(path, key, { flag: "wx", mode: 0o600 });
+    chmodSync(path, 0o600);
+    if (process.platform !== "darwin")
+      throw new Error(
+        "Macで実行してください。連携キーはdata/form-secret.keyに安全に保存しています。",
+      );
+    const copy = spawnSync("pbcopy", [], { input: key });
+    if (copy.status !== 0)
+      throw new Error(
+        "クリップボードにコピーできません。キーをチャットへ送らないでください。",
+      );
+    values.QR_FORM_SECRET = key;
+  } else if (analytics) {
     values.ANALYTICS_OPERATOR_ORIGIN = await hiddenInput(
       "実際のUnity Analytics HTTPS URL（末尾のパスなし）",
     );
@@ -70,9 +102,11 @@ async function main() {
     input: JSON.stringify(values),
   });
   console.log(
-    analytics
-      ? "Analyticsの接続設定を保存しました。管理画面でイベント取込を確認してください。"
-      : "LINE設定を保存しました。Webhook URL: " +
+    form
+      ? "フォーム連携キーをCloudflareへ保存し、クリップボードへコピーしました。GoogleフォームのApps Scriptで、スクリプトプロパティ QR_FORM_SECRET に貼り付けてください。キーはここに表示しません。"
+      : analytics
+        ? "Analyticsの接続設定を保存しました。管理画面でイベント取込を確認してください。"
+        : "LINE設定を保存しました。Webhook URL: " +
           state.url +
           "/api/v2/line/webhook\nLINE側でWebhookを有効にして接続検証し、専用テストイベントで「参加希望」を送ってください。",
   );

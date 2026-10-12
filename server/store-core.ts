@@ -15,7 +15,7 @@ export class ReceptionStore {
     this.sql.close();
   }
   migrate() {
-    if (this.sql.getVersion() > 3) fail("unsupported_schema", 503);
+    if (this.sql.getVersion() > 4) fail("unsupported_schema", 503);
     this.sql.transaction(() => {
       this.sql.exec(`
       CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('Admin','Staff','Viewer')), enabled INTEGER NOT NULL DEFAULT 1);
@@ -32,6 +32,10 @@ export class ReceptionStore {
       CREATE INDEX IF NOT EXISTS idx_audit_event ON audit(event_id,id);
       CREATE INDEX IF NOT EXISTS idx_registration_participant ON registrations(participant_id);
       CREATE INDEX IF NOT EXISTS idx_participants_name ON participants(name);
+      CREATE TABLE IF NOT EXISTS form_config(id INTEGER PRIMARY KEY CHECK(id=1),entry TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)));
+      CREATE TABLE IF NOT EXISTS form_event_mappings(external_event_id TEXT PRIMARY KEY NOT NULL,event_id TEXT NOT NULL REFERENCES events(id),event_date TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS form_claims(token_hash TEXT PRIMARY KEY NOT NULL,receipt_hash TEXT NOT NULL UNIQUE,external_event_id TEXT NOT NULL,event_date TEXT NOT NULL,name TEXT NOT NULL,event_name TEXT NOT NULL,created_at TEXT NOT NULL,participant_id TEXT REFERENCES participants(id),subject_hash TEXT);
+      CREATE INDEX IF NOT EXISTS idx_form_claim_event ON form_claims(external_event_id,event_date);
       CREATE TABLE IF NOT EXISTS line_identities(subject_hash TEXT PRIMARY KEY NOT NULL,participant_id TEXT NOT NULL UNIQUE REFERENCES participants(id),created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS line_event_settings(event_id TEXT PRIMARY KEY NOT NULL REFERENCES events(id),enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),opens_at TEXT NOT NULL,closes_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS line_tickets(token_hash TEXT PRIMARY KEY NOT NULL,event_id TEXT NOT NULL REFERENCES events(id),participant_id TEXT NOT NULL REFERENCES participants(id),expires_at INTEGER NOT NULL);
@@ -61,7 +65,7 @@ export class ReceptionStore {
       this.sql.exec(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_sequence ON outbox(sequence)",
       );
-      this.sql.setVersion(3);
+      this.sql.setVersion(4);
     });
   }
   row(sql: string, ...values: any[]): any {

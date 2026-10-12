@@ -129,6 +129,89 @@ test("LINE endpoints preserve admin authorization, CSRF, public isolation and bo
       ).status,
       403,
     );
+    cfg.formSecret = "test-only-form-key-".repeat(3);
+    const publicConfig = await call(
+      "/api/v2/form/config",
+      "GET",
+      undefined,
+      "",
+      "https://nyokki519.github.io",
+    );
+    assert.equal(publicConfig.status, 200);
+    assert.equal(
+      publicConfig.headers.get("access-control-allow-origin"),
+      "https://nyokki519.github.io",
+    );
+    assert.equal(
+      (
+        await call("/api/v2/form/config", "POST", {
+          entry: "entry.123",
+          enabled: true,
+        })
+      ).status,
+      401,
+    );
+    assert.equal(
+      (
+        await call(
+          "/api/v2/form/config",
+          "POST",
+          { entry: "entry.123", enabled: true },
+          "",
+          "https://script.google.com",
+          { Authorization: "Bearer " + cfg.formSecret },
+        )
+      ).status,
+      200,
+    );
+    assert.deepEqual(await (await call("/api/v2/form/config")).json(), {
+      version: 1,
+      entry: "entry.123",
+      enabled: true,
+    });
+    assert.equal((await call("/api/v2/form/accepted", "POST", {})).status, 401);
+    assert.equal(
+      (await call("/api/v2/form/map", "POST", {}, viewer)).status,
+      403,
+    );
+    assert.equal(
+      (
+        await call(
+          "/api/v2/form/accepted",
+          "POST",
+          { x: "a".repeat(20000) },
+          "",
+          "https://script.google.com",
+          { Authorization: "Bearer " + cfg.formSecret },
+        )
+      ).status,
+      413,
+    );
+    assert.equal(
+      (await call("/api/v2/form/disable", "POST", {}, viewer)).status,
+      403,
+    );
+    assert.equal(
+      (await call("/api/v2/form/disable", "POST", {}, admin)).status,
+      200,
+    );
+    assert.equal(
+      ((await (await call("/api/v2/form/config")).json()) as any).enabled,
+      false,
+    );
+    assert.equal(
+      (
+        await call(
+          "/api/v2/form/accepted",
+          "POST",
+          {},
+          "",
+          "https://script.google.com",
+          { Authorization: "Bearer " + cfg.formSecret },
+        )
+      ).status,
+      403,
+    );
     const settings = (await (
       await call("/api/v2/settings", "GET", undefined, admin)
     ).json()) as any;
@@ -149,4 +232,22 @@ test("LINE endpoints preserve admin authorization, CSRF, public isolation and bo
     await new Promise<void>((r) => app.close(() => r()));
     db.close();
   }
+});
+
+test("Google form config is public metadata only; accepted PII requires separate shared credential", async () => {
+  const { verifyFormAuth } = await import("../server/form-claims.js");
+  assert.throws(
+    () => verifyFormAuth("Bearer wrong", undefined),
+    /form_unavailable/,
+  );
+  assert.throws(
+    () => verifyFormAuth("Bearer wrong", "test-only-form-key-".repeat(3)),
+    /unauthorized/,
+  );
+  assert.doesNotThrow(() =>
+    verifyFormAuth(
+      "Bearer " + "test-only-form-key-".repeat(3),
+      "test-only-form-key-".repeat(3),
+    ),
+  );
 });

@@ -20,7 +20,7 @@ class NodeDriver implements SqlDriver {
       ).count;
       if (id !== 0x55515232 && (count > 0 || id !== 0))
         fail("foreign_database", 503);
-      if (this.getVersion() > 3) fail("unsupported_schema", 503);
+      if (this.getVersion() > 4) fail("unsupported_schema", 503);
       this.native.exec(
         "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;",
       );

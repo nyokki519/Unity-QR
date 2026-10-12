@@ -1,5 +1,9 @@
 # Unity CHECK-IN
 
+## Google申込から名前・イベント付きのQRを受け取る
+
+Unity_Sの申込画面から、申込専用コード入りのLINEメッセージを開けます。Google Formが実際に受理した名前・イベントID・日付を確認してから、本人の個別QRリンクを返信します。匿名のUnity計測IDは変更しません。導入には [フォーム連携手順](docs/qr-form-claim.md) の専用キー・Apps Script設定が必要です。未接続なら従来のLINE受付を維持します。
+
 ## 公式LINEから参加登録・個別QRの自動返信
 
 「参加希望」のDM → イベント選択・参加登録 → 個別QRページをReply APIで返信 → 当日スタッフ受付。LINE未接続でも既存受付を維持します。設定・本番更新・バックアップ手順は [LINE運用手順](docs/qr-line-operations.md)、Analyticsの運営イベント取込は [連携の範囲](docs/qr-line-analytics.md) を参照してください。実際の認証情報を設定するまでは未接続です。

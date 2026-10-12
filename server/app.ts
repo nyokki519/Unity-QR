@@ -26,6 +26,7 @@ import {
   type IntegrationConfig,
 } from "./integrations.js";
 
+import { FormClaims, verifyFormAuth } from "./form-claims.js";
 import { LineService, type LineConfig } from "./line.js";
 import {
   fetchAnalyticsOperatorEvents,
@@ -33,6 +34,7 @@ import {
 } from "./analytics-events.js";
 export type AppConfig = IntegrationConfig &
   Partial<LineConfig> & {
+    formSecret?: string;
     analyticsOperatorOrigin?: string;
     analyticsOperatorPassword?: string;
     origin: string;
@@ -50,12 +52,12 @@ function cookie(request: IncomingMessage) {
       ?.slice(cookieName.length + 1) || ""
   );
 }
-async function body(request: IncomingMessage) {
+async function body(request: IncomingMessage, maxBytes = 1024 * 1024) {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 1024 * 1024) fail("request_too_large", 413);
+    if (size > maxBytes) fail("request_too_large", 413);
     chunks.push(chunk);
   }
   try {
@@ -113,6 +115,31 @@ export function createHandler(
       const path = new URL(req.url || "/", cfg.origin),
         method = req.method || "GET";
       const line = new LineService(db, cfg);
+      const forms = new FormClaims(db);
+      if (path.pathname === "/api/v2/form/config") {
+        if (method === "GET") {
+          if (req.headers.origin === "https://nyokki519.github.io") {
+            res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
+            res.setHeader("Vary", "Origin");
+          }
+          return json(
+            res,
+            cfg.formSecret
+              ? forms.publicConfig()
+              : { version: 1, enabled: false, entry: null },
+          );
+        }
+        if (method === "POST") {
+          verifyFormAuth(req.headers.authorization, cfg.formSecret);
+          return json(res, forms.configure(await body(req, 16384)));
+        }
+      }
+      if (path.pathname === "/api/v2/form/accepted" && method === "POST") {
+        verifyFormAuth(req.headers.authorization, cfg.formSecret);
+        if (!forms.publicConfig().enabled) fail("form_disabled", 403);
+        return json(res, forms.accept(await body(req, 16384)));
+      }
+
       if (path.pathname === "/api/v2/line/webhook" && method === "POST") {
         let size = 0;
         const chunks: Buffer[] = [];
@@ -349,6 +376,7 @@ export function createHandler(
           return json(res, {
             version: 3,
             line: line.settings(actor),
+            forms: { ...forms.settings(actor), configured: !!cfg.formSecret },
             analyticsEventsConnected: !!(
               cfg.analyticsOperatorOrigin && cfg.analyticsOperatorPassword
             ),
@@ -372,6 +400,22 @@ export function createHandler(
                   .map((e) => e.event_id),
               })),
           });
+        }
+        if (path.pathname === "/api/v2/form/disable" && method === "POST") {
+          db.admin(actor);
+          await body(req);
+          const current = forms.publicConfig();
+          if (!current.entry) fail("form_unavailable", 503);
+          const result = forms.configure({
+            entry: current.entry,
+            enabled: false,
+          });
+          db.audit(actor, "form_disable", null, null);
+          return json(res, result);
+        }
+        if (path.pathname === "/api/v2/form/map" && method === "POST") {
+          db.admin(actor);
+          return json(res, forms.map(actor, await body(req), key));
         }
         if (path.pathname === "/api/v2/line/events" && method === "POST") {
           db.admin(actor);

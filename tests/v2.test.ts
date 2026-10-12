@@ -274,7 +274,7 @@ test("opening an unrelated database fails before modifying its schema or journal
     rmSync(dir, { recursive: true, force: true });
   }
 });
-test("additive v1-to-v3 outbox migration preserves attendance and durable mutation order", () => {
+test("additive v1-to-v4 outbox migration preserves attendance and durable mutation order", () => {
   const { db, event, participant } = setup();
   db.checkin(admin, event.id, participant.id, crypto.randomUUID());
   db.undo(admin, event.id, participant.id, "訂正", crypto.randomUUID());
@@ -294,6 +294,6 @@ test("additive v1-to-v3 outbox migration preserves attendance and durable mutati
     migrated.map((r: any) => JSON.parse(r.payload).sequence),
     [1, 2],
   );
-  assert.equal(db.row("PRAGMA user_version").user_version, 3);
+  assert.equal(db.row("PRAGMA user_version").user_version, 4);
   db.close();
 });
