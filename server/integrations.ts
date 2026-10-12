@@ -149,6 +149,7 @@ export function importSnapshot(
         db.run('INSERT OR IGNORE INTO form_event_mappings VALUES(?,?,?)',claim.external_event_id,event.id,day);
       }
       let person=claim?.participant_id ? db.row('SELECT id FROM participants WHERE id=?',claim.participant_id) : db.row("SELECT id FROM participants WHERE source='analytics' AND external_id=?",p.externalId);
+      if(claim&&!claim.participant_id&&person&&db.row('SELECT 1 FROM form_claims WHERE participant_id=? AND token_hash<>? LIMIT 1',person.id,p.claimHash)){heldParticipants++;continue;}
       if (!person) {
         const id=randomUUID();db.run("INSERT INTO participants(id,name,source,external_id,created_at) VALUES(?,?,'analytics',?,?)",id,text(p.name,60),p.externalId,new Date().toISOString());person={id};
       }

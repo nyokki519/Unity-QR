@@ -54,3 +54,11 @@ test('LINE reissue finds a claimed sheet event even without LINE signup settings
  assert.match(service.respond(msg('参加QR '+raw))[0].text,/申込テスト/);assert.match(service.respond(msg('QR再発行'))[0].text,/申込テスト/);assert.match(service.respond(msg('参加希望'))[0].text,/申込テスト/);assert.equal(db.row('SELECT count(*) n FROM registrations').n,2);
  }finally{db.close();}
 });
+test('a later distinct accepted receipt cannot claim an application already bound to another receipt',()=>{
+ const {db,event,person}=fixture();try{
+ const claims=new FormClaims(db),first='a'.repeat(64),second='b'.repeat(64);const accept=(raw:string)=>claims.accept({claimHash:digest(raw),receiptHash:digest('receipt:'+raw),name:person.name,eventId:'form-event',eventName:event.title,eventDate:japanDate(event.startsAt)});
+ accept(first);const snapshot=(raw:string)=>({version:1,events:[event],participants:[{...person,claimHash:digest(raw)}],registrations:[{eventExternalId:event.externalId,participantExternalId:person.externalId}]});
+ importSnapshot(db,admin,snapshot(first));const owner=claims.redeem(first,'c'.repeat(64));accept(second);
+ const result=importSnapshot(db,admin,snapshot(second));assert.equal(result.heldParticipants,1);assert.equal(db.row('SELECT participant_id FROM form_claims WHERE token_hash=?',digest(second)).participant_id,null);assert.equal(db.row('SELECT count(*) n FROM participants').n,1);assert.equal(claims.redeem(first,'c'.repeat(64)).person.id,owner.person.id);
+ }finally{db.close();}
+});
