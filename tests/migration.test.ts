@@ -173,7 +173,7 @@ test("null or mistyped identifiers and broken structured payloads cannot commit 
   }
 });
 
-test("schema 3 backup restores LINE identity and ticket state; legacy schema 2 still imports", () => {
+test("schema 4 backup restores LINE identity and ticket state; legacy schema 2 still imports", () => {
   const source = new Store(":memory:");
   const target = new Store(":memory:");
   const legacyTarget = new Store(":memory:");
@@ -216,14 +216,14 @@ test("schema 3 backup restores LINE identity and ticket state; legacy schema 2 s
       Date.now() + 60000,
     );
     const snapshot = exportSnapshot(source);
-    assert.equal(snapshot.schemaVersion, 3);
+    assert.equal(snapshot.schemaVersion, 4);
     importOwnedSnapshot(target, snapshot);
     assert.equal(target.row("SELECT count(*) n FROM line_identities").n, 1);
     assert.equal(target.row("SELECT count(*) n FROM line_tickets").n, 1);
     const old: any = structuredClone(snapshot);
     old.schemaVersion = 2;
     for (const table of Object.keys(old.tables))
-      if (table.startsWith("line_")) delete old.tables[table];
+      if (table.startsWith("line_") || table.startsWith("form_")) delete old.tables[table];
     importOwnedSnapshot(legacyTarget, old);
     assert.equal(legacyTarget.row("SELECT count(*) n FROM participants").n, 1);
     assert.equal(

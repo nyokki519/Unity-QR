@@ -306,12 +306,17 @@ function lineSettings(s) {
       .join("") || "<li>まだ処理の記録はありません。</li>"
   }</ul><p class="hint">返信が届かない場合は、参加者から「QR再発行」と送ってもらってください。秘密情報・LINEユーザーIDは表示しません。</p></section>`;
 }
+function formSettings(s) {
+  const forms = s.forms;
+  if (!forms) return "";
+  return `<section class="panel"><h2>申込フォーム・QR受取</h2><p class="hint">${forms.configured ? (forms.enabled ? "Googleフォーム受理通知の設定あり。実申込での確認が必要です。" : "連携キー設定あり。Googleフォームの導入待ちです。") : "フォーム未接続。既存LINE受付は引き続き利用できます。"}</p><p class="hint">申込者へ「LINEで参加QRを受け取る」を案内します。名前でイベントを推測しません。</p>${forms.enabled ? '<button class="secondary" data-action="formDisable">フォームのQR受取導線を停止</button>' : ""}<h3>受付イベントの紐付け待ち</h3>${forms.pending.map((p, i) => `<div class="userRow"><div><strong>${esc(p.eventName)}</strong><small>${esc(p.eventDate)} · ${p.count}申込 · ID ${esc(p.externalEventId)}</small></div><button class="secondary" data-action="formMap" data-pending="${i}">受付イベントを紐付け</button></div>`).join("") || '<p class="hint">紐付け待ちの申込はありません。</p>'}</section>`;
+}
 function settingsHTML() {
   const s = state.settings;
   return (
     pageHead("設定・管理", "運営アクセスと連携状態を管理します。") +
     (s
-      ? `<div class="settingsGrid">${lineSettings(s)}<section class="panel"><h2>サービス連携</h2>${[
+      ? `<div class="settingsGrid">${lineSettings(s)}${formSettings(s)}<section class="panel"><h2>サービス連携</h2>${[
           ["Unity PASS", "会員証QRのサーバー検証", s.passConnected],
           [
             "Analytics 運営出席イベント",
@@ -551,6 +556,19 @@ document.addEventListener("submit", async (e) => {
           }
         };
     }
+    if (form.id === "formMapForm") {
+      const pending =
+        state.settings?.forms?.pending?.[Number(form.dataset.pending)];
+      if (!pending) throw new Error("申込情報を再読み込みしてください。");
+      await api("form/map", {
+        eventId: values.eventId,
+        externalEventId: pending.externalEventId,
+        eventDate: pending.eventDate,
+      });
+      await afterMutation(
+        "受付イベントを紐付けました。参加者は同じ申込メッセージからQRを受け取れます。",
+      );
+    }
     if (form.id === "lineEventForm") {
       await api("line/events", {
         eventId: form.dataset.event,
@@ -650,6 +668,30 @@ document.addEventListener("click", async (e) => {
         "当日参加を登録",
         `<form id="walkinForm" data-event="${esc(state.eventId)}"><label>参加者名<input name="name" required maxlength="60" autocomplete="name"></label>${admin() ? '<label>共通会員ID（確認済みの場合のみ）<input name="memberId" maxlength="100" autocomplete="off"></label>' : ""}<p class="hint">同じ名前でも別の参加者として登録します。本人確認後に受付してください。</p><button class="primary full">登録する</button></form>`,
       );
+    if (action === "formDisable" && admin()) {
+      await api("form/disable", {});
+      await afterMutation(
+        "フォームのQR受取導線を停止しました。既存の参加者・LINE受付は維持されます。",
+      );
+    }
+    if (action === "formMap" && admin()) {
+      const index = Number(button.dataset.pending),
+        pending = state.settings?.forms?.pending?.[index];
+      if (!pending) return;
+      const matching = state.events.filter(
+        (e) =>
+          new Intl.DateTimeFormat("sv-SE", {
+            timeZone: "Asia/Tokyo",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(new Date(e.startsAt)) === pending.eventDate,
+      );
+      dialog(
+        "申込イベントを受付へ紐付け",
+        `<form id="formMapForm" data-pending="${index}"><p>${esc(pending.eventName)} · ${esc(pending.eventDate)}</p><label>同じ日の受付イベント<select name="eventId" required>${matching.map((e) => `<option value="${esc(e.id)}">${esc(e.title)} · ${date(e.startsAt)}</option>`).join("")}</select></label><p class="hint">${matching.length ? "イベント名と日時を確認して紐付けてください。既存の参加者・受付履歴は変更しません。" : "同じ日のイベントがありません。イベント管理で正しい日時のイベントを作成してください。"}</p><button class="primary full" ${matching.length ? "" : "disabled"}>紐付けを保存</button></form>`,
+      );
+    }
     if (action === "lineEvent" && admin()) {
       const selected = state.events.find((e) => e.id === button.dataset.event);
       const config = state.settings?.line?.events?.find(

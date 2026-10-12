@@ -110,7 +110,14 @@ try {
   await page.locator("#qr").waitFor({ state: "visible" });
   const ops = await browser.newPage();
   const writes: any[] = [];
-  let configured = false;
+  let configured = false,
+    mapped = false;
+  const formDate = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
   const event = {
     id: "event-1",
     title: "UNITY NIGHT",
@@ -138,6 +145,21 @@ try {
         users: [],
         sync: { pending: 0, failed: 0, runs: [] },
         analyticsEventsConnected: true,
+        forms: {
+          configured: true,
+          enabled: true,
+          pending: mapped
+            ? []
+            : [
+                {
+                  externalEventId: "source-id",
+                  eventDate: formDate,
+                  eventName: "Accepted form event",
+                  count: 1,
+                },
+              ],
+          mappings: [],
+        },
         line: {
           configured: true,
           channelIdConfigured: true,
@@ -154,6 +176,11 @@ try {
           deliveries: [],
         },
       };
+    if (path.endsWith("/form/map")) {
+      writes.push(body);
+      mapped = true;
+      json = { ok: true };
+    }
     if (path.endsWith("/line/events")) {
       writes.push(body);
       configured = true;
@@ -189,6 +216,14 @@ try {
     capacity: 80,
     preview: false,
     events: [{ id: "source-event" }],
+  });
+  await ops.locator('[data-action="formMap"]').click();
+  await ops.locator("#formMapForm button").click();
+  await expect(ops.locator("#modal")).not.toBeVisible();
+  assert.deepEqual(writes[3], {
+    eventId: event.id,
+    externalEventId: "source-id",
+    eventDate: formDate,
   });
   console.log(
     "LINE ticket browser: safe participant display, bearer-only token, QR rendering, responsive layout, invalid link passed",

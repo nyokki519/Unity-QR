@@ -4,7 +4,12 @@ const { Miniflare, convertV4MiniflareOptions } = require("miniflare");
 const { mkdtempSync, rmSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const { tmpdir } = require("node:os");
-const { randomUUID, createHmac } = require("node:crypto");
+const {
+  randomUUID,
+  createHmac,
+  createHash,
+  randomBytes,
+} = require("node:crypto");
 test("actual workerd LINE webhook, ticket page, cancelled QR and durable redelivery", async () => {
   const { Store } = await import("../dist/server/store.js");
   const { hashPassword } = await import("../dist/server/security.js");
@@ -49,6 +54,7 @@ test("actual workerd LINE webhook, ticket page, cancelled QR and durable redeliv
         bindings: {
           QR_SIGNING_KEY: key,
           QR_SETUP_TOKEN: setup,
+          QR_FORM_SECRET: "test-only-form-worker-key-".repeat(3),
           LINE_CHANNEL_ID: "1234567890",
           LINE_CHANNEL_SECRET: secret,
           LINE_CHANNEL_ACCESS_TOKEN: "test-not-real-token",
@@ -228,12 +234,106 @@ test("actual workerd LINE webhook, ticket page, cancelled QR and durable redeliv
       200,
     );
     assert.equal(replies.length, 1);
+    const claimCode = randomBytes(32).toString("hex"),
+      externalId = randomUUID();
+    const formKey = "test-only-form-worker-key-".repeat(3);
+    assert.equal(
+      (
+        await call(
+          "/api/v2/form/config",
+          "POST",
+          { entry: "entry.123", enabled: true },
+          "",
+          { Authorization: "Bearer " + formKey },
+        )
+      ).status,
+      200,
+    );
+    const accepted = {
+      claimHash: createHash("sha256").update(claimCode).digest("hex"),
+      receiptHash: createHash("sha256")
+        .update("accepted-receipt")
+        .digest("hex"),
+      name: "Google confirmed name",
+      eventId: externalId,
+      eventName: "Cloud LINE",
+      eventDate: new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date()),
+    };
+    assert.equal(
+      (await call("/api/v2/form/accepted", "POST", accepted)).status,
+      401,
+    );
+    assert.equal(
+      (
+        await call("/api/v2/form/accepted", "POST", accepted, "", {
+          Authorization: "Bearer " + formKey,
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await call("/api/v2/form/accepted", "POST", accepted, "", {
+          Authorization: "Bearer " + formKey,
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await call(
+          "/api/v2/form/map",
+          "POST",
+          {
+            eventId: event.id,
+            externalEventId: externalId,
+            eventDate: accepted.eventDate,
+          },
+          cookie,
+        )
+      ).status,
+      200,
+    );
+    const claimData = {
+      ...data,
+      events: [
+        {
+          ...data.events[0],
+          webhookEventId: randomUUID(),
+          replyToken: "test-claim-reply",
+          source: { type: "user", userId: "U" + "b".repeat(32) },
+          message: { type: "text", text: "参加QR " + claimCode },
+        },
+      ],
+    };
+    const claimSignature = createHmac("sha256", secret)
+      .update(JSON.stringify(claimData))
+      .digest("base64");
+    assert.equal(
+      (
+        await call("/api/v2/line/webhook", "POST", claimData, "", {
+          "X-Line-Signature": claimSignature,
+        })
+      ).status,
+      200,
+    );
+    for (let i = 0; i < 40 && replies.length < 2; i++)
+      await new Promise((r) => setTimeout(r, 50));
+    assert.equal(replies.length, 2);
+    assert.match(replies[1].messages[0].text, /Google confirmed name/);
     const backup = await (
       await call("/api/v2/backup", "GET", undefined, cookie)
     ).json();
-    assert.equal(backup.schemaVersion, 3);
-    assert.equal(backup.tables.line_webhooks.length, 1);
+    assert.equal(backup.schemaVersion, 4);
+    assert.equal(backup.tables.line_webhooks.length, 2);
     assert.ok(!JSON.stringify(backup).includes("test-reply-token"));
+    assert.equal(backup.tables.form_claims.length, 1);
+    assert.ok(!JSON.stringify(backup).includes(claimCode));
   } finally {
     await mf?.dispose();
     rmSync(dir, { recursive: true, force: true });

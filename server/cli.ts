@@ -16,7 +16,11 @@ if (command === "verify") {
       throw new Error("Backup integrity failed");
     if (copy.prepare("PRAGMA foreign_key_check").all().length)
       throw new Error("Backup foreign key check failed");
-    if (![2,3].includes((copy.prepare("PRAGMA user_version").get() as any).user_version))
+    if (
+      ![2, 3, 4].includes(
+        (copy.prepare("PRAGMA user_version").get() as any).user_version,
+      )
+    )
       throw new Error("Unexpected backup schema");
     if (
       (copy.prepare("PRAGMA application_id").get() as any).application_id !==

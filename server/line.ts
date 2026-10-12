@@ -5,6 +5,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import QRCode from "qrcode";
+import { FormClaims } from "./form-claims.js";
 import type { Actor, ReceptionStore } from "./store-core.js";
 import {
   ApiError,
@@ -190,6 +191,53 @@ export class LineService {
         "「参加希望」「QR再発行」「参加確認」「キャンセル」と送ってください。",
       );
     const command = input.trim();
+    const submission = /^参加QR\s+([a-f0-9]{64})$/.exec(command);
+    if (e.type === "message" && command.startsWith("参加QR")) {
+      if (!submission)
+        return reply(
+          "申込専用コードを確認できません。申込画面のボタンからメッセージを送ってください。",
+        );
+      try {
+        const accepted = new FormClaims(this.db).redeem(submission[1], subject);
+        const token = randomBytes(32).toString("hex");
+        this.db.run(
+          "INSERT INTO line_tickets VALUES(?,?,?,?)",
+          digest(token),
+          accepted.event.id,
+          accepted.person.id,
+          Date.parse(accepted.event.closesAt) + 7 * 86400000,
+        );
+        return reply(
+          accepted.event.title +
+            "\n参加者：" +
+            accepted.person.name +
+            "\n申込情報を確認しました。受付でQRを提示してください。\n" +
+            this.cfg.origin +
+            "/ticket/#" +
+            token +
+            "\nこのリンクは本人用です。他の方に転送しないでください。",
+        );
+      } catch (error) {
+        const messages: Record<string, string> = {
+          claim_pending:
+            "Googleでの申込受理をまだ確認できません。少し待って同じ申込メッセージを送ってください。",
+          claim_event_pending:
+            "申込は確認できました。イベントの受付準備中です。運営へお問い合わせください。",
+          claim_used:
+            "この申込コードは別のLINEで使用済みです。運営へお問い合わせください。",
+          registration_cancelled:
+            "この参加はキャンセル済みです。運営へお問い合わせください。",
+          event_closed: "このイベントの受付は終了しました。",
+          capacity_reached:
+            "このイベントは定員に達しています。運営へお問い合わせください。",
+          claim_event_date_mismatch:
+            "イベントの日程を確認できません。運営へお問い合わせください。",
+        };
+        if (error instanceof ApiError && messages[error.message])
+          return reply(messages[error.message]);
+        throw error;
+      }
+    }
     let action =
       command === "キャンセル"
         ? "cancel"

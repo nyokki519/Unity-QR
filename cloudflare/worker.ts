@@ -21,6 +21,7 @@ export interface CloudEnv {
   QR_SIGNING_KEY?: string;
   QR_SETUP_TOKEN?: string;
   QR_ORIGIN?: string;
+  QR_FORM_SECRET?: string;
   LINE_CHANNEL_ID?: string;
   LINE_CHANNEL_SECRET?: string;
   LINE_CHANNEL_ACCESS_TOKEN?: string;
@@ -118,6 +119,7 @@ export class QRReception {
       origin: url.origin,
       signingKey: secret(this.env.QR_SIGNING_KEY),
       root: "",
+      formSecret: this.env.QR_FORM_SECRET,
       lineSchedule: (work) => this.ctx.waitUntil(work),
       lineChannelId: this.env.LINE_CHANNEL_ID,
       lineChannelSecret: this.env.LINE_CHANNEL_SECRET,

@@ -99,7 +99,7 @@ export async function prepareMigration(sourcePath: string, output: string) {
       .application_id;
     const version = (source.prepare("PRAGMA user_version").get() as any)
       .user_version;
-    if (id !== 0x55515232 || ![1, 2, 3].includes(version))
+    if (id !== 0x55515232 || ![1, 2, 3, 4].includes(version))
       throw new Error(
         "Unity QRの対応DBではありません。元データは変更しません。",
       );
