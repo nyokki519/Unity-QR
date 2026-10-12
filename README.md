@@ -10,7 +10,9 @@
 - イベント作成・編集、受付人数、定員、受付時間帯。
 - Analyticsの取込・同期アダプター、PASS検証アダプター（実サービス未接続）。
 
-Node 24と永続SQLiteサーバーが必要です。GitHub Pagesの既存デモはそのまま公開されますが、新APIはPagesでは実行できません。
+Macを閉じても受付できる **Cloudflare無料枠の構成** を追加しました。Macで確認済みのDBと管理者情報を保護して移行できます。[無料クラウドへの公開手順](docs/qr-v2-free-cloud.md) を参照してください。公開には利用者のCloudflareログインが必要です。
+
+Node 24と永続SQLiteサーバーでの従来の起動方法も使えます。GitHub Pagesの既存デモはそのまま公開されますが、新APIはPagesでは実行できません。
 
 ```sh
 npm ci

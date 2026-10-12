@@ -20,6 +20,7 @@ let scanner = null,
   toastTimer = null,
   refreshing = false,
   navigating = false,
+  lastRefresh = 0,
   revision = 0;
 const esc = (value) =>
   String(value ?? "").replace(
@@ -686,10 +687,12 @@ setInterval(async () => {
     refreshing ||
     navigating ||
     modal.open ||
-    ["settings", "events"].includes(state.view)
+    ["settings", "events"].includes(state.view) ||
+    Date.now() - lastRefresh < (state.actor.pollIntervalMs || 8000)
   )
     return;
   refreshing = true;
+  lastRefresh = Date.now();
   try {
     await load();
     if (!state.actor || navigating) return;

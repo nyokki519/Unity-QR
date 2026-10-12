@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Store, type Actor } from "./store.js";
+import type { ReceptionStore as Store, Actor } from "./store-core.js";
 import { fail, text } from "./security.js";
 
 export type IntegrationConfig = {
@@ -105,8 +105,7 @@ export function importSnapshot(
     preview,
   };
   if (preview) return counts;
-  db.sql.exec("BEGIN IMMEDIATE");
-  try {
+  return db.sql.transaction(() => {
     for (const e of snapshot.events)
       db.run(
         "INSERT OR IGNORE INTO events(id,title,starts_at,opens_at,closes_at,venue,capacity,source,external_id) VALUES(?,?,?,?,?,?,?,'analytics',?)",
@@ -150,12 +149,8 @@ export function importSnapshot(
       JSON.stringify(counts),
       new Date().toISOString(),
     );
-    db.sql.exec("COMMIT");
     return counts;
-  } catch (e) {
-    db.sql.exec("ROLLBACK");
-    throw e;
-  }
+  });
 }
 export async function fetchSnapshot(
   cfg: IntegrationConfig,

@@ -6,7 +6,8 @@ import {
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import QRCode from "qrcode";
-import { Store, type Actor } from "./store.js";
+import type { ReceptionStore as Store, Actor } from "./store-core.js";
+import { exportSnapshot } from "./migration.js";
 import {
   ApiError,
   fail,
@@ -29,6 +30,7 @@ export type AppConfig = IntegrationConfig & {
   origin: string;
   signingKey: string;
   root: string;
+  pollIntervalMs?: number;
 };
 const cookieName = "unity_qr_session";
 function cookie(request: IncomingMessage) {
@@ -70,8 +72,34 @@ function json(res: ServerResponse, data: any, status = 200) {
     .end(JSON.stringify(data));
 }
 export function createApp(db: Store, cfg: AppConfig) {
-  const attempts = new Map<string, { count: number; expires: number }>();
-  return createServer(async (req, res) => {
+  return createServer(createHandler(db, cfg));
+}
+export type LoginAttempts = {
+  get(ip: string): { count: number; expires: number } | undefined;
+  set(ip: string, value: { count: number; expires: number }): void;
+  delete(ip: string): void;
+  clearExpired(time: number): void;
+};
+export function createHandler(
+  db: Store,
+  cfg: AppConfig,
+  persistedAttempts?: LoginAttempts,
+) {
+  const memory = new Map<string, { count: number; expires: number }>();
+  const attempts: LoginAttempts = persistedAttempts || {
+    get: (ip) => memory.get(ip),
+    set: (ip, value) => {
+      memory.set(ip, value);
+    },
+    delete: (ip) => {
+      memory.delete(ip);
+    },
+    clearExpired: (time) => {
+      for (const [ip, value] of memory)
+        if (value.expires <= time) memory.delete(ip);
+    },
+  };
+  return async (req: IncomingMessage, res: ServerResponse) => {
     headers(res);
     try {
       const path = new URL(req.url || "/", cfg.origin),
@@ -92,8 +120,7 @@ export function createApp(db: Store, cfg: AppConfig) {
         if (path.pathname === "/api/v2/login" && method === "POST") {
           const ip = req.socket.remoteAddress || "unknown";
           const time = Date.now();
-          for (const [key, record] of attempts)
-            if (record.expires <= time) attempts.delete(key);
+          attempts.clearExpired(time);
           const current = attempts.get(ip) || {
             count: 0,
             expires: time + 15 * 60000,
@@ -102,9 +129,9 @@ export function createApp(db: Store, cfg: AppConfig) {
             res.setHeader("Retry-After", "900");
             fail("too_many_attempts", 429);
           }
-          const input = await body(req);
           current.count++;
           attempts.set(ip, current);
+          const input = await body(req);
           if (
             typeof input.username !== "string" ||
             typeof input.password !== "string"
@@ -120,7 +147,13 @@ export function createApp(db: Store, cfg: AppConfig) {
         const eventId = path.searchParams.get("event") || "";
         const key = String(req.headers["idempotency-key"] || "");
         if (path.pathname === "/api/v2/session" && method === "GET")
-          return json(res, { role: actor.role, events: actor.events });
+          return json(res, {
+            role: actor.role,
+            events: actor.events,
+            ...(cfg.pollIntervalMs
+              ? { pollIntervalMs: cfg.pollIntervalMs }
+              : {}),
+          });
         if (path.pathname === "/api/v2/logout" && method === "POST") {
           db.logout(token);
           setCookie("", 0);
@@ -272,6 +305,15 @@ export function createApp(db: Store, cfg: AppConfig) {
         }
         if (path.pathname === "/api/v2/history" && method === "GET")
           return json(res, { history: db.history(actor, eventId) });
+        if (path.pathname === "/api/v2/backup" && method === "GET") {
+          db.admin(actor);
+          db.audit(actor, "cloud_backup", null, null);
+          res.setHeader(
+            "Content-Disposition",
+            'attachment; filename="unity-qr-backup.json"',
+          );
+          return json(res, exportSnapshot(db));
+        }
         if (path.pathname === "/api/v2/settings" && method === "GET") {
           db.admin(actor);
           return json(res, {
@@ -393,5 +435,5 @@ export function createApp(db: Store, cfg: AppConfig) {
         error instanceof ApiError ? error.status : 500,
       );
     }
-  });
+  };
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createApp } from "../server/app.js";
 import { Store } from "../server/store.js";
 import { hashPassword, signTicket } from "../server/security.js";
+import { importOwnedSnapshot } from "../server/migration.js";
 import {
   importSnapshot,
   deliverOutbox,
@@ -82,6 +83,40 @@ async function harness() {
     },
   };
 }
+test("private Node backups require Admin and restore accounts and registrations without sessions or signing secrets", async () => {
+  const h = await harness();
+  const target = new Store(":memory:");
+  try {
+    assert.equal((await h.call("/api/v2/backup")).status, 401);
+    assert.equal(
+      (
+        await h.call(
+          "/api/v2/backup",
+          "GET",
+          undefined,
+          await h.login("viewer"),
+        )
+      ).status,
+      403,
+    );
+    const cookie = await h.login();
+    const result = await h.call("/api/v2/backup", "GET", undefined, cookie);
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get("cache-control"), "no-store");
+    const snapshot = await result.json();
+    assert.equal("sessions" in snapshot.tables, false);
+    assert.equal(JSON.stringify(snapshot).includes(h.config.signingKey), false);
+    importOwnedSnapshot(target, snapshot);
+    assert.ok(target.login("admin", "test-only-password-123"));
+    assert.equal(
+      target.person(admin, h.event.id, h.participant.id).status,
+      "waiting",
+    );
+  } finally {
+    target.close();
+    await h.close();
+  }
+});
 test("private API requires server session, no-store, exact origin and viewer restrictions", async () => {
   const h = await harness();
   try {

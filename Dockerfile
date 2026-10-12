@@ -6,6 +6,8 @@ RUN --mount=type=secret,id=proxy_ca \
 COPY tsconfig.json ./
 COPY server ./server
 COPY tests ./tests
+COPY cloudflare ./cloudflare
+COPY scripts ./scripts
 COPY ops ./ops
 RUN npm run build
 

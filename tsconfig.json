@@ -10,5 +10,5 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["server/**/*.ts", "tests/*.ts"]
+  "include": ["server/**/*.ts", "tests/*.ts", "cloudflare/**/*.ts", "scripts/**/*.ts"]
 }

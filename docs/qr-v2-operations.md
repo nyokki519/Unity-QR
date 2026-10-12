@@ -2,7 +2,7 @@
 
 ## Before production
 
-For a test deployment with fewer manual settings, follow [Render Blueprint setup](qr-v2-render.md). It provisions paid isolated resources; deployment and physical device verification remain required.
+For free cloud use without a running Mac, follow [Cloudflare deployment and migration](qr-v2-free-cloud.md). The existing Node/Docker setup below remains supported. [Render Blueprint setup](qr-v2-render.md) is a separate paid option; the user has declined it.
 
 The existing GitHub Pages site remains unchanged. GitHub Pages cannot run the new APIs. Deploy a Node **24** server behind HTTPS, with a private persistent SQLite volume. A stateless Vercel/serverless deployment is unsupported. No default Admin, LINE ID, PASS key or fake integration endpoint is provided.
 

@@ -4,6 +4,9 @@ dist
 data
 .env
 .env.*
+.dev.vars
+.dev.vars.*
+.wrangler
 *.sqlite*
 test-results
 generated_images
