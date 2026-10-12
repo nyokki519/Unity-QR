@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unity-qr-free",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "send_metrics": false,
+  "assets": {
+    "directory": "dist/cloudflare-public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "QR_DB", "class_name": "QRReception" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["QRReception"] }],
+  "observability": { "enabled": false },
+}
