@@ -165,3 +165,45 @@ test("capturing the supported Wrangler auth command never writes a credential-be
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("completed production cannot be updated through initial migration helper without fresh backup", async () => {
+  const { writeFileSync, mkdirSync, readFileSync } = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const { resolve } = await import("node:path");
+  const { digest } = await import("../server/security.js");
+  const dir = mkdtempSync(join(tmpdir(), "qr-completed-deploy-"));
+  try {
+    mkdirSync(join(dir, "data/cloud-migration"), { recursive: true });
+    const signing = "test-only-completed-key-".repeat(3);
+    writeFileSync(join(dir, "data/iphone-test-signing.key"), signing);
+    const path = join(dir, "data/cloud-migration/deployment.json");
+    const original = JSON.stringify({
+      application: "unity-qr-cloud-deploy-v1",
+      name: "unity-qr-free-123456789abc",
+      ownerId: "a".repeat(32),
+      signingDigest: digest(signing),
+      complete: true,
+    });
+    writeFileSync(path, original);
+    const result = spawnSync(
+      process.execPath,
+      [resolve("dist/scripts/cloud-deploy.js")],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        timeout: 5000,
+        env: {
+          ...process.env,
+          QR_SIGNING_KEY: signing,
+          WRANGLER_WRITE_LOGS: "false",
+          WRANGLER_SEND_METRICS: "false",
+        },
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /cloud:update/);
+    assert.equal(readFileSync(path, "utf8"), original);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

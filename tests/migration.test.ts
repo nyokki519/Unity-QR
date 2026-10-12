@@ -172,3 +172,67 @@ test("null or mistyped identifiers and broken structured payloads cannot commit 
     target.close();
   }
 });
+
+test("schema 3 backup restores LINE identity and ticket state; legacy schema 2 still imports", () => {
+  const source = new Store(":memory:");
+  const target = new Store(":memory:");
+  const legacyTarget = new Store(":memory:");
+  try {
+    source.addUser(
+      "line-backup",
+      hashPassword("test-only-backup-password"),
+      "Admin",
+    );
+    const actor: any = { id: "test", role: "Admin", events: [] };
+    const e = source.createEvent(
+      actor,
+      {
+        title: "Backup LINE",
+        venue: "Tokyo",
+        startsAt: new Date().toISOString(),
+        opensAt: new Date().toISOString(),
+        closesAt: new Date(Date.now() + 3600000).toISOString(),
+        capacity: 10,
+      },
+      crypto.randomUUID(),
+    );
+    const p = source.register(
+      actor,
+      e.id,
+      { name: "LINE fixture" },
+      crypto.randomUUID(),
+    );
+    source.run(
+      "INSERT INTO line_identities VALUES(?,?,?)",
+      "a".repeat(64),
+      p.id,
+      new Date().toISOString(),
+    );
+    source.run(
+      "INSERT INTO line_tickets VALUES(?,?,?,?)",
+      "b".repeat(64),
+      e.id,
+      p.id,
+      Date.now() + 60000,
+    );
+    const snapshot = exportSnapshot(source);
+    assert.equal(snapshot.schemaVersion, 3);
+    importOwnedSnapshot(target, snapshot);
+    assert.equal(target.row("SELECT count(*) n FROM line_identities").n, 1);
+    assert.equal(target.row("SELECT count(*) n FROM line_tickets").n, 1);
+    const old: any = structuredClone(snapshot);
+    old.schemaVersion = 2;
+    for (const table of Object.keys(old.tables))
+      if (table.startsWith("line_")) delete old.tables[table];
+    importOwnedSnapshot(legacyTarget, old);
+    assert.equal(legacyTarget.row("SELECT count(*) n FROM participants").n, 1);
+    assert.equal(
+      legacyTarget.row("SELECT count(*) n FROM line_identities").n,
+      0,
+    );
+  } finally {
+    source.close();
+    target.close();
+    legacyTarget.close();
+  }
+});

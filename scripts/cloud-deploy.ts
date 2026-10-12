@@ -99,7 +99,7 @@ export async function prepareMigration(sourcePath: string, output: string) {
       .application_id;
     const version = (source.prepare("PRAGMA user_version").get() as any)
       .user_version;
-    if (id !== 0x55515232 || ![1, 2].includes(version))
+    if (id !== 0x55515232 || ![1, 2, 3].includes(version))
       throw new Error(
         "Unity QRの対応DBではありません。元データは変更しません。",
       );
@@ -251,6 +251,8 @@ async function main() {
       backupPath: prepared.backupPath,
     };
   }
+  if (state.complete === true)
+    throw new Error("既存クラウドの更新には npm run cloud:update を使ってください。初回移行で本番を上書きしません。");
   const save = () =>
     writeFileSync(statePath, JSON.stringify(state, null, 2), { mode: 0o600 });
   save();
@@ -339,7 +341,7 @@ async function main() {
     remoteExists,
     state.ownerId,
     remoteSettings,
-    state.complete === true,
+    false,
   );
   state.started = true;
   save();

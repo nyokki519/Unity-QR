@@ -2,7 +2,7 @@ name: Unity QR validation
 on:
   pull_request:
   push:
-    branches: [feature/unity-qr-v2]
+    branches: [feature/unity-qr-v2, feature/line-auto-registration]
 permissions:
   contents: read
 jobs:
@@ -19,6 +19,6 @@ jobs:
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run typecheck
       - run: npm test
-      - run: npm run test:legacy && npm run test:ops
+      - run: npm run test:legacy && npm run test:ops && npm run test:line-ui
         env:
           BROWSER_ENGINE: webkit
