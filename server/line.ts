@@ -192,7 +192,7 @@ export class LineService {
       );
     const command = input.trim();
     const submission = /^参加QR\s+([a-f0-9]{64})$/.exec(command);
-    if (e.type === "message" && command.startsWith("参加QR")) {
+    if (e.type === "message" && command.startsWith("参加QR") && command !== "参加QR") {
       if (!submission)
         return reply(
           "申込専用コードを確認できません。申込画面のボタンからメッセージを送ってください。",
@@ -245,7 +245,7 @@ export class LineService {
     let action =
       command === "キャンセル"
         ? "cancel"
-        : ["QR", "QR再発行", "参加確認"].includes(command)
+        : ["参加QR", "QR", "QR再発行", "参加確認"].includes(command)
           ? "ticket"
           : "register";
     let selected: string | undefined;
@@ -268,7 +268,7 @@ export class LineService {
     let supplied: string | undefined;
     if (
       e.type === "message" &&
-      !["参加希望", "QR", "QR再発行", "参加確認", "キャンセル"].includes(
+      !["参加希望", "参加QR", "QR", "QR再発行", "参加確認", "キャンセル"].includes(
         command,
       )
     ) {
@@ -290,8 +290,16 @@ export class LineService {
         );
       }
     }
+    let owned = this.db.rows(`SELECT DISTINCT e.*,c.participant_id ownedParticipant,r.status registrationStatus FROM form_claims c JOIN registrations r ON r.participant_id=c.participant_id JOIN events e ON e.id=r.event_id LEFT JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE c.subject_hash=? AND c.event_date=strftime('%Y-%m-%d',e.starts_at,'+9 hours') AND (m.event_id=e.id OR (m.event_id IS NULL AND e.source='analytics' AND e.external_id=c.external_event_id)) AND e.closes_at>? ORDER BY e.starts_at LIMIT 51`,subject,new Date().toISOString());
+    const shortRequest=e.type==='message'&&['参加QR','参加希望'].includes(command);
+    if(shortRequest){
+      owned=owned.filter(row=>row.registrationStatus==='planned');
+      const formEnabled=new FormClaims(this.db).publicConfig().enabled;
+      if(!identity&&!owned.length&&(command==='参加QR'||formEnabled))return reply('初回の申込との紐づけが必要です。申込完了画面の「LINEで参加QRを受け取る」から、専用コード付きメッセージを送ってください。再申込は不要です。');
+      if(command==='参加QR'||owned.length||formEnabled)action='ticket';
+    }
     let events = this.events(action !== "register");
-    const owned = this.db.rows(`SELECT DISTINCT e.*,c.participant_id ownedParticipant FROM form_claims c JOIN registrations r ON r.participant_id=c.participant_id JOIN events e ON e.id=r.event_id LEFT JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE c.subject_hash=? AND c.event_date=strftime('%Y-%m-%d',e.starts_at,'+9 hours') AND (m.event_id=e.id OR (m.event_id IS NULL AND e.source='analytics' AND e.external_id=c.external_event_id)) AND e.closes_at>? ORDER BY e.starts_at LIMIT 51`,subject,new Date().toISOString());
+    if(shortRequest&&action==='ticket')events=events.filter(ev=>identity&&this.db.row("SELECT 1 FROM registrations WHERE event_id=? AND participant_id=? AND status='planned'",ev.id,identity.participant_id));
     if (action !== 'register') {
       events=events.filter(ev=>identity&&this.db.row('SELECT status FROM registrations WHERE event_id=? AND participant_id=?',ev.id,identity.participant_id));
       if(!identity&&!owned.length)return reply('まだ参加登録がありません。「参加希望」と送ってください。');
@@ -309,6 +317,7 @@ export class LineService {
       return reply(
         "このイベントは申込受付を終了したか、選択が無効になっています。「参加希望」から確認してください。",
       );
+    if(shortRequest&&action==='register'&&identity&&this.db.row("SELECT status FROM registrations WHERE event_id=? AND participant_id=?",ev.id,identity.participant_id)?.status==='cancelled'){const confirmation=this.choice([ev],'register');confirmation[0].text=ev.title+' はキャンセル済みです。再参加する場合は、下のイベントを選択して確認してください。';return confirmation;}
     if(action==='register'&&owned.some(row=>row.id===ev.id))action='ticket';
     if(action!=='register') {
       const ids=new Set(owned.filter(row=>row.id===ev.id).map(row=>row.ownedParticipant));

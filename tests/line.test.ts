@@ -125,7 +125,9 @@ test("LINE registrations enforce capacity, cancellations and prior attendance", 
     const token = a[0].text.match(/#([a-f0-9]{64})/)![1];
     assert.equal(service.ticket(token).status, "cancelled");
     assert.equal(service.ticket(token).qr, undefined);
-    service.respond(event(), "A");
+    const retry = service.respond(event(), "A");
+    assert.match(retry[0].text, /キャンセル済み/);
+    service.respond({...event(),type:"postback",postback:{data:retry[0].quickReply!.items[0].action.data}}, "A");
     const p = db.row(
       "SELECT participant_id FROM line_identities WHERE subject_hash IS NOT NULL",
     ).participant_id;
