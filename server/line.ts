@@ -153,7 +153,7 @@ export class LineService {
         (all ? "" : " AND s.opens_at<=? AND s.closes_at>?") +
         " ORDER BY e.starts_at LIMIT 51",
       ...(all ? [time] : [time, time, time]),
-    );
+    ).filter(event=>!this.db.event(system,event.id).archived);
   }
   private choice(events: any[], action: string): Message[] {
     return [
@@ -220,6 +220,7 @@ export class LineService {
         );
       } catch (error) {
         const messages: Record<string, string> = {
+          event_archived: "このイベントは中止・削除されているためQRを発行できません。運営へお問い合わせください。",
           claim_pending:
             "Googleでの申込受理をまだ確認できません。少し待って同じ申込メッセージを送ってください。",
           claim_registration_pending:
@@ -296,14 +297,17 @@ export class LineService {
       owned=owned.filter(row=>row.registrationStatus==='planned');
       const formEnabled=new FormClaims(this.db).publicConfig().enabled;
       if(!identity&&!owned.length&&(command==='参加QR'||formEnabled))return reply('初回の申込との紐づけが必要です。申込完了画面の「LINEで参加QRを受け取る」から、専用コード付きメッセージを送ってください。再申込は不要です。');
-      if(command==='参加QR'||owned.length||formEnabled)action='ticket';
+      const mergedRegistration=identity&&this.db.row("SELECT 1 FROM registrations r JOIN events e ON e.id=r.event_id JOIN audit a ON a.event_id=e.id AND a.action='event_merge_receive' WHERE r.participant_id=? AND e.closes_at>? LIMIT 1",identity.participant_id,new Date().toISOString());
+      if(command==='参加QR'||owned.length||formEnabled||mergedRegistration)action='ticket';
     }
     let events = this.events(action !== "register");
+    if(action!=='register'&&identity)events.push(...this.db.rows(`SELECT DISTINCT e.* FROM events e JOIN registrations r ON r.event_id=e.id JOIN audit a ON a.event_id=e.id AND a.action='event_merge_receive' WHERE r.participant_id=? AND e.closes_at>? ORDER BY e.starts_at LIMIT 51`,identity.participant_id,new Date().toISOString()).filter(ev=>!this.db.event(system,ev.id).archived));
     if(shortRequest&&action==='ticket')events=events.filter(ev=>identity&&this.db.row("SELECT 1 FROM registrations WHERE event_id=? AND participant_id=? AND status='planned'",ev.id,identity.participant_id));
     if (action !== 'register') {
       events=events.filter(ev=>identity&&this.db.row('SELECT status FROM registrations WHERE event_id=? AND participant_id=?',ev.id,identity.participant_id));
       if(!identity&&!owned.length)return reply('まだ参加登録がありません。「参加希望」と送ってください。');
     }
+    owned=owned.filter(ev=>!this.db.event(system,ev.id).archived);
     const byId=new Map(events.map(ev=>[ev.id,ev]));for(const ev of owned)if(!byId.has(ev.id))byId.set(ev.id,ev);events=[...byId.values()].sort((a,b)=>a.starts_at.localeCompare(b.starts_at));
     if (!events.length)
       return reply(
@@ -496,7 +500,7 @@ export class LineService {
   }
   issueParticipantLink(actor: Actor,eventId:string,participantId:string,key:string) {
     eventId=text(eventId,120);participantId=text(participantId,120);
-    this.db.event(actor,eventId);
+    this.db.event(actor,eventId,true);
     if(actor.role!=='Admin'&&actor.role!=='Staff')fail('forbidden',403);
     const person=this.db.person(actor,eventId,participantId,true),event=this.db.event(actor,eventId);
     if(person.status==='cancelled')fail('registration_cancelled',409);
@@ -523,8 +527,9 @@ export class LineService {
       Date.now(),
     );
     if (!row) fail("ticket_not_found", 404);
-    const event = this.db.event(system, row.event_id),
-      p = this.db.person(system, row.event_id, row.participant_id);
+    const eventId=this.db.canonicalEvent(row.event_id);
+    const event = this.db.event(system, eventId),
+      p = this.db.person(system, eventId, row.participant_id);
     const base = {
       name: p.name,
       event: {
@@ -535,6 +540,7 @@ export class LineService {
         venue: event.venue,
       },
     };
+    if (event.archived) return {...base,status:"archived"};
     if (p.status === "cancelled") return { ...base, status: "cancelled" };
     if (p.status === "checkedIn") return { ...base, status: "checkedIn" };
     if (Date.parse(event.closesAt) <= Date.now())
@@ -550,7 +556,7 @@ export class LineService {
       status: "planned",
       token: signTicket(
         this.cfg.signingKey,
-        row.event_id,
+        eventId,
         row.participant_id,
         expiresAt,
       ),

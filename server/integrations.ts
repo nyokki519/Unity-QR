@@ -125,13 +125,14 @@ export function importSnapshot(
         eventRefs.set(e.externalId,db.row("SELECT id FROM events WHERE source='analytics' AND external_id=?",e.externalId).id);
       }
     }
+    for(const [externalId,id] of eventRefs){const target=db.canonicalEvent(id);if(db.event(actor,target).archived)fail('event_archived',409);eventRefs.set(externalId,target);}
     for(const e of snapshot.events) {
       const targetId=eventRefs.get(e.externalId)!,day=new Date(e.startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
       if(new Date(db.event(actor,targetId).startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})!==day)fail('claim_event_date_mismatch',409);
       const aliases=new Set<string>([...(e.aliases||[]),...(/^sheet-event:[a-f0-9]{64}$/.test(e.externalId)?[e.externalId]:[])]);
       for(const alias of aliases) {
         const mapped=db.row('SELECT event_id FROM form_event_mappings WHERE external_event_id=? AND event_date=?',alias,day),direct=db.row("SELECT id FROM events WHERE source='analytics' AND external_id=?",alias);
-        if((mapped&&mapped.event_id!==targetId)||(direct&&direct.id!==targetId))fail('claim_event_mapping_conflict',409);
+        if((mapped&&mapped.event_id!==targetId)||(direct&&db.canonicalEvent(direct.id)!==targetId))fail('claim_event_mapping_conflict',409);
         db.run('INSERT OR IGNORE INTO form_event_mappings VALUES(?,?,?)',alias,targetId,day);
         if(!mapped)db.audit(actor,'sheet_event_map',targetId,null);
       }

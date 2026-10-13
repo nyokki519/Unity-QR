@@ -207,7 +207,7 @@ export function createHandler(
           return json(res, {
             role: actor.role,
             events: actor.events,
-            features: {sheetReception:1,similarEventAliases:1},
+            features: {sheetReception:1,similarEventAliases:1,eventOrganization:1},
             ...(cfg.pollIntervalMs
               ? { pollIntervalMs: cfg.pollIntervalMs }
               : {}),
@@ -218,13 +218,20 @@ export function createHandler(
           return json(res, { ok: true });
         }
         if (path.pathname === "/api/v2/events") {
-          if (method === "GET") return json(res, { events: db.events(actor) });
+          if (method === "GET") {const includeArchived=path.searchParams.get("includeArchived")==="1";if(includeArchived)db.admin(actor);return json(res, { events: db.events(actor,includeArchived) });}
           if (method === "POST")
             return json(res, db.createEvent(actor, await body(req), key), 201);
           if (method === "PATCH") {
             const input = await body(req);
             return json(res, db.updateEvent(actor, input.eventId, input, key));
           }
+        }
+        if(path.pathname.startsWith('/api/v2/events/')&&method==='POST'){
+          db.admin(actor);const input=await body(req);const action=path.pathname.slice('/api/v2/events/'.length);
+          if(action==='archive')return json(res,db.archiveEvent(actor,input.eventId,input.reason,key));
+          if(action==='restore')return json(res,db.restoreEvent(actor,input.eventId,input.reason,key));
+          if(action==='merge-preview')return json(res,db.previewEventMerge(actor,input.sourceId,input.targetId));
+          if(action==='merge')return json(res,db.mergeEvent(actor,input.sourceId,input.targetId,input.fingerprint,key));
         }
         if (path.pathname === "/api/v2/participants") {
           if (method === "GET")
@@ -324,7 +331,7 @@ export function createHandler(
               participantId = verifyTicket(
                 cfg.signingKey,
                 input.ticket,
-                input.eventId,
+                db.ticketEventIds(input.eventId),
               ).participantId;
               source = "qr";
             }

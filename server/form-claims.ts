@@ -152,9 +152,12 @@ export class FormClaims {
     const rows=this.db.rows("SELECT id,title,starts_at FROM events WHERE strftime('%Y-%m-%d',starts_at,'+9 hours')=?",day);
     const candidates=rows.map((event:any)=>{
       const evidence=this.db.rows("SELECT DISTINCT c.event_name name FROM form_claims c JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE m.event_id=?",event.id).map((row:any)=>row.name);
-      return {event,names:[event.title,...evidence]};
+      const root=this.db.event(system,this.db.canonicalEvent(event.id));
+      return {event:root,names:[event.title,...evidence]};
     }).filter(({names}:any)=>names.some((other:string)=>similarReceptionEventNames(other,name)));
-    if(candidates.length>1||candidates.some(({names}:any)=>!names.every((other:string)=>similarReceptionEventNames(other,name))))fail("claim_event_ambiguous",409);
+    const roots=new Set(candidates.map(c=>c.event.id));
+    if(roots.size>1||candidates.some(({names}:any)=>!names.every((other:string)=>similarReceptionEventNames(other,name))))fail("claim_event_ambiguous",409);
+    if(candidates.some(c=>c.event.archived))fail("event_archived",409);
     let eventId=candidates[0]?.event.id;
     if(eventId){
       const opaque=this.db.rows("SELECT external_event_id key FROM form_event_mappings m WHERE m.event_id=? AND m.external_event_id LIKE 'sheet-event:%' AND NOT EXISTS(SELECT 1 FROM form_claims c WHERE c.external_event_id=m.external_event_id AND c.event_date=m.event_date)",eventId);
@@ -184,7 +187,7 @@ export class FormClaims {
         claim.external_event_id,
         claim.event_date,
       );
-      const ev = mapping
+      let ev = mapping
         ? this.db.event(system, mapping.event_id)
         : this.db.row(
             "SELECT id,starts_at startsAt,closes_at closesAt,capacity,title FROM events WHERE source=? AND external_id=?",
@@ -192,6 +195,8 @@ export class FormClaims {
             claim.external_event_id,
           );
       if (!ev) fail("claim_event_pending", 409);
+      ev=this.db.event(system,this.db.canonicalEvent(ev.id));
+      if(ev.archived)fail("event_archived",409);
       if (japanDate(ev.startsAt) !== claim.event_date)
         fail("claim_event_date_mismatch", 409);
       if (Date.parse(ev.closesAt) <= Date.now()) fail("event_closed", 410);
