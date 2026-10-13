@@ -30,10 +30,17 @@ test('ambiguous and transitive variants never create or bind another reception',
  const d=application(db,'ABCDE',japanDate(new Date(Date.now()+86400000).toISOString())),e=application(db,'ABCDF',d.day),f=application(db,'ABXDF',d.day);claims.redeem(d.raw,'d'.repeat(64));claims.redeem(e.raw,'e'.repeat(64));assert.throws(()=>claims.redeem(f.raw,'f'.repeat(64)),/claim_event_ambiguous/);assert.equal(db.events(actor).length,3);
  }finally{db.close();}
 });
-test('unaccepted, forged internal keys and public IDs never auto-create events',()=>{
+test('unaccepted and forged internal keys never auto-create events',()=>{
  const db=new Store(':memory:');try{const claims=new FormClaims(db);assert.throws(()=>claims.redeem('a'.repeat(64),'b'.repeat(64)),/claim_pending/);
  const bad=application(db,'リピーター会',undefined,'sheet-event:'+'f'.repeat(64));assert.throws(()=>claims.redeem(bad.raw,'b'.repeat(64)),/claim_event_pending/);
- const pub=application(db,'リピーター会',undefined,'public-id');assert.throws(()=>claims.redeem(pub.raw,'b'.repeat(64)),/claim_event_pending/);assert.equal(db.events(actor).length,0);
+ assert.equal(db.events(actor).length,0);
+ }finally{db.close();}
+});
+test('accepted published applications create reception and issue QR for either keyword, then reuse it',()=>{
+ const db=new Store(':memory:');try{const app=application(db,'公開イベント',undefined,'public-event-fixture');const line=new LineService(db,{origin:'https://qr.example',signingKey:'fixture-key'.repeat(5),lineChannelId:'1234567890'});
+ for(const keyword of ['参加希望','参加QR']){const result=line.respond({type:'message',source:{type:'user',userId:'U'+'a'.repeat(32)},message:{type:'text',text:keyword+' '+app.raw}} as any)[0].text;assert.match(result,/公開イベント/);assert.match(result,/\/ticket\/#/);}
+ assert.equal(db.events(actor).length,1);assert.equal(db.row('SELECT count(*) n FROM registrations').n,1);
+ const another=application(db,'公開イベント',app.day,'second-public-fixture');new FormClaims(db).redeem(another.raw,'b'.repeat(64));assert.equal(db.events(actor).length,1);
  }finally{db.close();}
 });
 test('accepted long free-input titles still issue QR and numbered sessions remain separate',()=>{

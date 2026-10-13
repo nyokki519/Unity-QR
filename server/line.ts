@@ -191,8 +191,8 @@ export class LineService {
         "「参加希望」「QR再発行」「参加確認」「キャンセル」と送ってください。",
       );
     const command = input.trim();
-    const submission = /^参加QR\s+([a-f0-9]{64})$/.exec(command);
-    if (e.type === "message" && command.startsWith("参加QR") && command !== "参加QR") {
+    const submission = /^(?:参加QR|参加希望)\s+([a-f0-9]{64})$/.exec(command);
+    if (e.type === "message" && /^(?:参加QR|参加希望)\s+/.test(command)) {
       if (!submission)
         return reply(
           "申込専用コードを確認できません。申込画面のボタンからメッセージを送ってください。",
