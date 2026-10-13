@@ -224,6 +224,7 @@ export class LineService {
             "Googleでの申込受理をまだ確認できません。少し待って同じ申込メッセージを送ってください。",
           claim_registration_pending:
             "申込名簿との紐づけを確認中です。運営の受付更新後に、同じ申込メッセージをもう一度送ってください。",
+          claim_event_ambiguous: "申込は確認できました。同日のイベント候補が複数あるため、運営による確認が必要です。再申込せずお問い合わせください。",
           claim_event_pending:
             "申込は確認できました。イベントの受付準備中です。運営へお問い合わせください。",
           claim_used:
