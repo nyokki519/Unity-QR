@@ -1,5 +1,14 @@
 # Unity QR 2.0 implementation status
 
+## 2026-10-14 Event organization completion
+
+- Admin-only merge preview/confirmation, reversible archive (delete/cancel) and restore added. Audit-derived lifecycle uses schema4 with no new tables/columns; indexed merge lookup limits QR scanning to actual aliases. Original registrations/history remain; no real DB or Form/LINE operations performed.
+- Merge: same-JST-date, active roots, compatible capacity/registration state, no attendance/undo history. Distinct participants stay distinct. Previous ticket pages resolve to target; signed source QR retains signature/expiry checks and only canonical target reception accepts it. Staff scope never broadens. Merged target date edits, missing audit targets/cycles and stale previews rejected.
+- Archived events stop registration/checkin/private QR/Form redemption/import. Ordinary archives restore; merged sources remain hidden and cannot unmerge. Legacy LINE reissue survives merge without target signup, without unrelated manual registrations.
+- Submitted-name hotfix PR10 merged into deployment branch. Existing incorrectly-issued records deliberately not rewritten; new claims use accepted names, preserving previous records/global LINE reference.
+- Verification:91 unit/API+7 workerd, full npm test (legacy15/ops8/LINE), typecheck/build passed. Chromium/WebKit8 scenarios include merge→archive→restore. Independent follow-up found no Important issues. Analytics315 tests/typecheck and build passed; old-backend capability fallback retained.
+- GitHub PR/CI delivery next. Owner cloud:update required on latest feature/sheet-authoritative-reception; Google scripts/secrets unchanged. Analytics can release first, detecting lifecycle after QR update. Guide: docs/qr-event-organizing.md.
+
 Plan: `docs/qr-v2-plan.md`. Spec: `docs/qr-v2-design.md`.
 
 - Repository and production branch verified; audit saved.

@@ -6,6 +6,7 @@ const root = document.querySelector("#app"),
 const state = {
   actor: null,
   events: [],
+  archivedEvents: [],
   eventId: "",
   view: "dashboard",
   people: [],
@@ -49,6 +50,13 @@ const errors = {
   invalid_qr:
     "QRが正しくありません。このイベントの参加者QRを使用してください。",
   qr_expired: "QRの有効期限が切れています。再発行してください。",
+  event_archived: "このイベントは中止・削除・統合済みです。",
+  event_merged: "統合元は単独で復元できません。統合先を確認してください。",
+  merge_date_mismatch: "同じ開催日のイベントを選んでください。",
+  merge_has_attendance: "受付・取消履歴があるイベントは統合できません。履歴保護のため個別に管理してください。",
+  merge_preview_changed: "確認後に申込や設定が変わりました。統合内容を再確認してください。",
+  merge_registration_conflict: "同じ参加者の申込状態が異なります。参加取消を確認してください。",
+  invalid_event_merge: "異なる統合先イベントを選んでください。",
   event_closed: "このイベントは受付時間外です。",
   capacity_reached: "定員に達しています。運営責任者に確認してください。",
   registration_cancelled: "参加登録がキャンセルされています。",
@@ -283,7 +291,7 @@ function eventsHTML() {
         ? '<div class="actions"><button class="primary" data-action="newEvent">イベントを作成</button></div>'
         : "",
     ) +
-    `<div class="eventList">${state.events.map((e) => `<article class="eventCard"><p class="eyebrow">${Date.parse(e.closesAt) < Date.now() ? "PAST EVENT" : "UPCOMING EVENT"}</p><h2>${esc(e.title)}</h2><span class="pill">${e.checkedIn}名 受付済み</span><div class="eventMeta"><span>開催<strong>${date(e.startsAt)}</strong></span><span>会場<strong>${esc(e.venue)}</strong></span><span>受付開始<strong>${date(e.opensAt)}</strong></span><span>受付終了<strong>${date(e.closesAt)}</strong></span><span>定員<strong>${e.capacity}名</strong></span>${e.externalId ? `<span>外部ID<strong>${esc(e.externalId)}</strong></span>` : ""}</div><div class="actions"><button class="primary" data-action="selectEvent" data-event="${esc(e.id)}">このイベントを選択</button>${admin() ? `<button class="secondary" data-action="editEvent" data-event="${esc(e.id)}">編集</button>` : ""}</div></article>`).join("") || empty("イベントがありません。")}</div>`
+    `<div class="eventList">${state.events.map((e) => `<article class="eventCard"><p class="eyebrow">${Date.parse(e.closesAt) < Date.now() ? "PAST EVENT" : "UPCOMING EVENT"}</p><h2>${esc(e.title)}</h2><span class="pill">${e.checkedIn}名 受付済み</span><div class="eventMeta"><span>開催<strong>${date(e.startsAt)}</strong></span><span>会場<strong>${esc(e.venue)}</strong></span><span>受付開始<strong>${date(e.opensAt)}</strong></span><span>受付終了<strong>${date(e.closesAt)}</strong></span><span>定員<strong>${e.capacity}名</strong></span>${e.externalId ? `<span>外部ID<strong>${esc(e.externalId)}</strong></span>` : ""}</div><div class="actions"><button class="primary" data-action="selectEvent" data-event="${esc(e.id)}">このイベントを選択</button>${admin() ? `<button class="secondary" data-action="editEvent" data-event="${esc(e.id)}">編集</button><button class="secondary" data-action="mergeEvent" data-event="${esc(e.id)}">イベントをまとめる</button><button class="danger" data-action="archiveEvent" data-event="${esc(e.id)}">削除・中止</button>` : ""}</div></article>`).join("") || empty("イベントがありません。")}</div>` + (admin()?`<details class="panel"><summary>削除・中止・統合済み（${state.archivedEvents.length}件）</summary>${state.archivedEvents.map(e=>`<div class="userRow"><div><strong>${esc(e.title)}</strong><small>${date(e.startsAt)} · ${e.mergedInto?'統合済み':'非表示'} · 履歴は保存されています</small></div>${e.mergedInto?'':`<button class="secondary" data-action="restoreEvent" data-event="${esc(e.id)}">復元</button>`}</div>`).join('')||'<p>対象はありません。</p>'}</details>`:'')
   );
 }
 function lineSettings(s) {
@@ -388,7 +396,9 @@ function renderView() {
 }
 async function load() {
   const generation = revision;
-  const { events } = await api("events");
+  const { events: allEvents } = await api(admin()?"events?includeArchived=1":"events");
+  const events=allEvents.filter(e=>!e.archived);
+  state.archivedEvents=allEvents.filter(e=>e.archived);
   if (generation !== revision) return;
   state.events = events;
   if (!events.some((e) => e.id === state.eventId))
@@ -569,6 +579,14 @@ document.addEventListener("submit", async (e) => {
         "受付イベントを紐付けました。参加者は同じ申込メッセージからQRを受け取れます。",
       );
     }
+    if(form.id==='eventArchiveForm'){
+      await api('events/'+form.dataset.action,{eventId:form.dataset.event,reason:values.reason});await afterMutation(form.dataset.action==='restore'?'イベントを復元しました。':'イベントを一覧から削除しました。履歴は保持しています。');
+    }
+    if(form.id==='eventMergeForm'){
+      const p=await api('events/merge-preview',{sourceId:form.dataset.event,targetId:values.targetId});
+      dialog('イベント統合を確認',`<p><strong>${esc(p.source.title)}</strong>（${p.sourceCount}名）を <strong>${esc(p.target.title)}</strong>（${p.targetCount}名）へまとめます。</p><p>統合後：${p.resultCount}名。統合先の受付時間・定員・会場を使います。</p><p>${date(p.target.opensAt)} — ${date(p.target.closesAt)} · ${esc(p.target.venue)} · 定員 ${p.target.capacity}名</p><p class="hint">統合は元に戻せません。元のイベントは非表示になり、発行済みQRリンクは統合先へ引き継ぎます。参加者を名前で同一人物と判定しません。${p.sameNameGroups?'同姓同名の候補があります。本人確認して個別に受付してください。':''}</p><form id="eventMergeConfirm"><input type="hidden" name="sourceId" value="${esc(p.source.id)}"><input type="hidden" name="targetId" value="${esc(p.target.id)}"><input type="hidden" name="fingerprint" value="${esc(p.fingerprint)}"><button class="danger full">確認してイベントを統合</button></form>`);
+    }
+    if(form.id==='eventMergeConfirm'){await api('events/merge',values);state.eventId=values.targetId;await afterMutation('イベントを統合しました。参加者は個別に保持しています。');}
     if (form.id === "lineEventForm") {
       await api("line/events", {
         eventId: form.dataset.event,
@@ -659,6 +677,16 @@ document.addEventListener("click", async (e) => {
     actionRevision = revision;
   if (!action) return;
   try {
+    if(['archiveEvent','restoreEvent'].includes(action)&&admin()){
+      const item=[...state.events,...state.archivedEvents].find(e=>e.id===button.dataset.event);if(!item)return;
+      dialog(action==='restoreEvent'?'イベントを復元':'イベントを削除・中止',`<p>${esc(item.title)}</p><p class="hint">削除は一覧からの非表示です。参加者と受付履歴を保持し、後から復元できます。削除中はQR発行・受付を停止します。</p><form id="eventArchiveForm" data-event="${esc(item.id)}" data-action="${action==='restoreEvent'?'restore':'archive'}"><label>理由<input name="reason" required maxlength="240"></label><button class="danger full">${action==='restoreEvent'?'復元する':'確認して削除・中止'}</button></form>`);
+    }
+    if(action==='mergeEvent'&&admin()){
+      const source=state.events.find(e=>e.id===button.dataset.event);if(!source)return;
+      const day=value=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date(value));
+      const targets=state.events.filter(e=>e.id!==source.id&&day(e.startsAt)===day(source.startsAt));
+      dialog('登録イベントをまとめる',`<p>統合元：${esc(source.title)}</p><p class="hint">同じ開催日の統合先を選びます。受付・取消履歴がある場合は統合せず個別管理してください。</p>${targets.length?`<form id="eventMergeForm" data-event="${esc(source.id)}"><label>統合先<select name="targetId" aria-label="統合先" required><option value="">選択してください</option>${targets.map(e=>`<option value="${esc(e.id)}">${esc(e.title)} · ${e.total}名</option>`).join('')}</select></label><button class="primary full">統合内容を確認</button></form>`:'<p>同日の統合先イベントがありません。</p>'}`);
+    }
     if (action === "logout") {
       await api("logout", {});
       loggedOut();
