@@ -154,7 +154,7 @@ function validateRow(table: string, row: Record<string, any>) {
       fail("invalid_migration");
     if (
       table === "form_claims" &&
-      (row.participant_id === null) !== (row.subject_hash === null)
+      row.subject_hash !== null && row.participant_id === null
     )
       fail("invalid_migration");
   }

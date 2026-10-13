@@ -236,3 +236,13 @@ test("schema 4 backup restores LINE identity and ticket state; legacy schema 2 s
     legacyTarget.close();
   }
 });
+test('backup restores an accepted form linked by Analytics before its first LINE redemption',async()=>{
+ const {FormClaims,japanDate}=await import('../server/form-claims.js');const {importSnapshot}=await import('../server/integrations.js');const {digest}=await import('../server/security.js');
+ const s=source(),target=new Store(':memory:');try{
+ const raw='a'.repeat(64),hash=digest(raw),forms=new FormClaims(s.db);forms.accept({claimHash:hash,receiptHash:digest('accepted'),name:'Test B',eventId:'form-event',eventName:s.event.title,eventDate:japanDate(s.event.startsAt)});
+ importSnapshot(s.db,s.actor,{version:1,events:[{externalId:'sheet-event',receptionId:s.event.id,title:s.event.title,venue:s.event.venue,startsAt:s.event.startsAt,opensAt:s.event.opensAt,closesAt:s.event.closesAt,capacity:10}],participants:[{externalId:'sheet-person',name:'Test B',claimHash:hash}],registrations:[{eventExternalId:'sheet-event',participantExternalId:'sheet-person'}]});
+ const before=s.db.row('SELECT participant_id,subject_hash FROM form_claims');assert(before.participant_id);assert.equal(before.subject_hash,null);
+ importOwnedSnapshot(target,exportSnapshot(s.db));assert.deepEqual(target.row('SELECT participant_id,subject_hash FROM form_claims'),before);
+ const claim=new FormClaims(target).redeem(raw,'b'.repeat(64));assert.equal(claim.person.id,before.participant_id);
+ }finally{s.db.close();target.close();}
+});
