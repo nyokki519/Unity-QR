@@ -42,3 +42,13 @@ test('accepted long free-input titles still issue QR and numbered sessions remai
  const first=application(db,'初心者ヨガ第一回'),second=application(db,'初心者ヨガ第二回');assert.notEqual(claims.redeem(first.raw,'d'.repeat(64)).event.id,claims.redeem(second.raw,'e'.repeat(64)).event.id);
  }finally{db.close();}
 });
+test('a new accepted application uses its submitted name rather than the prior LINE identity',()=>{
+ const db=new Store(':memory:');try{const cfg={origin:'https://qr.example',signingKey:'fixture-key'.repeat(5),lineChannelId:'1234567890'},line=new LineService(db,cfg),user='U'+'a'.repeat(32);
+ const first=application(db,'初回テスト'),second=application(db,'新規受付確認');const msg=(raw:string):any=>({type:'message',source:{type:'user',userId:user},message:{type:'text',text:'参加QR '+raw}});
+ const initial=line.respond(msg(first.raw))[0].text,firstPerson=db.participants(actor,db.events(actor).find(e=>e.title==='初回テスト')!.id)[0];
+ const expected=db.row('SELECT name FROM form_claims WHERE token_hash=?',digest(second.raw)).name;
+ const result=line.respond(msg(second.raw))[0].text;assert.match(result,new RegExp(expected));const rawTicket=result.match(/\/ticket\/#([a-f0-9]{64})/)![1];assert.equal(line.ticket(rawTicket).name,expected);
+ assert.equal(db.person(actor,db.events(actor).find(e=>e.title==='初回テスト')!.id,firstPerson.id).name,firstPerson.name);assert.equal(db.row('SELECT participant_id FROM line_identities').participant_id,firstPerson.id);
+ assert.match(line.respond(msg(second.raw))[0].text,new RegExp(expected));assert.equal(db.summary(actor,db.events(actor).find(e=>e.title==='新規受付確認')!.id).total,1);assert(initial.includes(firstPerson.name));
+ }finally{db.close();}
+});
