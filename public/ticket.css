@@ -129,3 +129,5 @@ footer {
 [hidden] {
   display: none !important;
 }
+
+.unityLogo { width: 64px; height: 64px; object-fit: contain; background: #fffaef; border: 0; border-radius: 12px; }

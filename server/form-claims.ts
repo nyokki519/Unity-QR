@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { ReceptionStore, Actor } from "./store-core.js";
 import { digest, fail, text } from "./security.js";
+import {normalizedEventName,similarReceptionEventNames} from "./event-names.js";
 const system: Actor = { id: "system:form", role: "Admin", events: [] };
 export function japanDate(value: string) {
   return new Intl.DateTimeFormat("sv-SE", {
@@ -143,6 +144,29 @@ export class FormClaims {
       },
     );
   }
+  private autoReception(claim: any) {
+    const key=claim.external_event_id,day=claim.event_date,name=claim.event_name;
+    // Only the authenticated Form bridge's verifiable free-input key may create.
+    if(key!=="sheet-event:"+digest(JSON.stringify([day,normalizedEventName(name)]))) return;
+    if(Date.parse(day+"T00:00:00+09:00")+86400000<=Date.now())fail("event_closed",410);
+    const rows=this.db.rows("SELECT id,title,starts_at FROM events WHERE strftime('%Y-%m-%d',starts_at,'+9 hours')=?",day);
+    const candidates=rows.map((event:any)=>{
+      const evidence=this.db.rows("SELECT DISTINCT c.event_name name FROM form_claims c JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE m.event_id=?",event.id).map((row:any)=>row.name);
+      return {event,names:[event.title,...evidence]};
+    }).filter(({names}:any)=>names.some((other:string)=>similarReceptionEventNames(other,name)));
+    if(candidates.length>1||candidates.some(({names}:any)=>!names.every((other:string)=>similarReceptionEventNames(other,name))))fail("claim_event_ambiguous",409);
+    let eventId=candidates[0]?.event.id;
+    if(eventId){
+      const opaque=this.db.rows("SELECT external_event_id key FROM form_event_mappings m WHERE m.event_id=? AND m.external_event_id LIKE 'sheet-event:%' AND NOT EXISTS(SELECT 1 FROM form_claims c WHERE c.external_event_id=m.external_event_id AND c.event_date=m.event_date)",eventId);
+      if(opaque.some((row:any)=>row.key!==key))fail("claim_event_ambiguous",409);
+    } else {
+      eventId=randomUUID();const opens=new Date(day+"T00:00:00+09:00").toISOString(),closes=new Date(Date.parse(opens)+86400000).toISOString();
+      this.db.run("INSERT INTO events(id,title,starts_at,opens_at,closes_at,venue,capacity,source,external_id) VALUES(?,?,?,?,?,?,?,'analytics',?)",eventId,text(name,300),opens,opens,closes,"会場情報未登録",10000,key);
+      this.db.audit(system,"form_event_auto_create",eventId,null);
+    }
+    this.db.run("INSERT INTO form_event_mappings VALUES(?,?,?)",key,eventId,day);
+    this.db.audit(system,"form_event_auto_map",eventId,null);
+  }
   redeem(token: string, subject: string) {
     if (!/^[a-f0-9]{64}$/.test(token) || !/^[a-f0-9]{64}$/.test(subject))
       fail("claim_invalid", 404);
@@ -154,6 +178,7 @@ export class FormClaims {
       if (!claim) fail("claim_pending", 409);
       if (claim.subject_hash && claim.subject_hash !== subject)
         fail("claim_used", 409);
+      if(!this.db.row("SELECT 1 FROM form_event_mappings WHERE external_event_id=? AND event_date=?",claim.external_event_id,claim.event_date)&&!this.db.row("SELECT 1 FROM events WHERE source='analytics' AND external_id=?",claim.external_event_id))this.autoReception(claim);
       const mapping = this.db.row(
         "SELECT event_id FROM form_event_mappings WHERE external_event_id=? AND event_date=?",
         claim.external_event_id,

@@ -1,8 +1,8 @@
 :root {
   --green: #183c32;
   --deep: #102b24;
-  --paper: #f5f3eb;
-  --card: #fffefa;
+  --paper: #fffaef;
+  --card: #fffdf7;
   --gold: #baa67d;
   --ink: #203b33;
   --muted: #757e72;
@@ -1020,3 +1020,10 @@ dialog h2 {
     transition: none !important;
   }
 }
+
+/* Reuse the official cafe mark rather than a letter monogram. */
+.unityLogo { object-fit: contain; background: #fffaef; border: 0; border-radius: 12px; width: 64px; height: 64px; }
+.loading .unityLogo { width: 96px; height: 96px; }
+.cameraBox .unityLogo { width: 112px; height: 112px; }
+.sidebar .brand .unityLogo { width: 64px; height: 64px; }
+@media(max-width:700px) { .sidebar .brand .unityLogo { width: 52px; height: 52px; } }

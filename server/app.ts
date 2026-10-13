@@ -520,6 +520,7 @@ export function createHandler(
       }
       if (method !== "GET" && method !== "HEAD") fail("not_found", 404);
       const allowed: Record<string, [string, string]> = {
+        "/assets/unity-logo.webp": ["assets/unity-logo.webp", "image/webp"],
         "/": ["index.html", "text/html; charset=utf-8"],
         "/index.html": ["index.html", "text/html; charset=utf-8"],
         "/app.js": ["app.js", "text/javascript"],

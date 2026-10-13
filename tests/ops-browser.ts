@@ -68,6 +68,8 @@ async function run(
   page.on("pageerror", (e) => errors.push(e.message));
   try {
     await page.goto(cfg.origin + "/ops/");
+    await expect(page.locator(".brand img.unityLogo")).toBeVisible();
+    await expect.poll(() => page.locator(".brand img.unityLogo").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
     if (process.env.QR_CAPTURE === "1" && passed === 0)
       await page.screenshot({
         path: "/tmp/unity-qr-v2-login.png",
