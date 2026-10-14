@@ -146,8 +146,9 @@ export class FormClaims {
   }
   private autoReception(claim: any) {
     const key=claim.external_event_id,day=claim.event_date,name=claim.event_name;
-    // Only the authenticated Form bridge's verifiable free-input key may create.
-    if(key!=="sheet-event:"+digest(JSON.stringify([day,normalizedEventName(name)]))) return;
+    // Claims exist only after the authenticated Form bridge accepts a response.
+    // Published IDs may create receptions too; malformed internal keys remain rejected.
+    if(key.startsWith("sheet-event:")&&key!=="sheet-event:"+digest(JSON.stringify([day,normalizedEventName(name)]))) return;
     if(Date.parse(day+"T00:00:00+09:00")+86400000<=Date.now())fail("event_closed",410);
     const rows=this.db.rows("SELECT id,title,starts_at FROM events WHERE strftime('%Y-%m-%d',starts_at,'+9 hours')=?",day);
     const candidates=rows.map((event:any)=>{
