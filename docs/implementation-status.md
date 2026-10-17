@@ -1,5 +1,10 @@
 # Unity QR 2.0 implementation status
 
+## 2026-10-17 Silent unrelated LINE messages
+
+- Exact reception commands, valid claim messages and existing event buttons remain active; unrelated prose/non-text/oversized messages return no reply. Live name conversations require explicit 名前： notation to prevent thanks/delay notices becoming participants. Existing webhook ignored state skips LINE replies/profile calls.
+- 94 unit/API +7 workerd tests, typecheck/build passed with fixture data only. No production changes or message sends. Cloudflare cloud:update is required; see docs/line-silent-messages.md.
+
 ## 2026-10-14 Event organization completion
 
 - Admin-only merge preview/confirmation, reversible archive (delete/cancel) and restore added. Audit-derived lifecycle uses schema4 with no new tables/columns; indexed merge lookup limits QR scanning to actual aliases. Original registrations/history remain; no real DB or Form/LINE operations performed.

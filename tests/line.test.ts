@@ -179,7 +179,7 @@ test("LINE ignores group events, handles no events, multiple selection and expir
     assert.equal(db.row("SELECT count(*) n FROM participants").n, 0);
     assert.match(
       service.respond(
-        event(randomUUID(), undefined, "入力した名前"),
+        event(randomUUID(), undefined, "名前：入力した名前"),
         undefined,
       )[0].text,
       /ticket/,
@@ -436,11 +436,11 @@ test("profile failure requests name, successful replies finish, redirect failure
     }
     assert.equal(db.row("SELECT count(*) n FROM participants").n, 0);
     db.run("UPDATE line_conversations SET expires_at=0");
-    assert.match(
+    assert.deepEqual(
       service.respond(
         event(randomUUID(), "U" + "1".repeat(32), "Expired name"),
-      )[0].text,
-      /参加希望/,
+      ),
+      [],
     );
     assert.equal(db.row("SELECT count(*) n FROM participants").n, 0);
   } finally {
