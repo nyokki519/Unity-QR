@@ -1,3 +1,4 @@
+import {eventLifecycle,canonicalEvent,archiveEvent,previewEventMerge,mergeEvent} from "./event-organizing.js";
 import { randomUUID, randomBytes } from "node:crypto";
 import { checkPassword, digest, fail, text } from "./security.js";
 import type { SqlDriver } from "./storage.js";
@@ -30,6 +31,7 @@ export class ReceptionStore {
       CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY,event_id TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL DEFAULT 0,last_error TEXT,created_at TEXT NOT NULL,sequence INTEGER NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS sync_runs(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,created_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_audit_event ON audit(event_id,id);
+      CREATE INDEX IF NOT EXISTS idx_audit_action ON audit(action,event_id);
       CREATE INDEX IF NOT EXISTS idx_registration_participant ON registrations(participant_id);
       CREATE INDEX IF NOT EXISTS idx_participants_name ON participants(name);
       CREATE TABLE IF NOT EXISTS form_config(id INTEGER PRIMARY KEY CHECK(id=1),entry TEXT NOT NULL,enabled INTEGER NOT NULL CHECK(enabled IN (0,1)));
@@ -92,13 +94,23 @@ export class ReceptionStore {
       id,
     );
     if (!row) fail("event_not_found", 404);
-    return row;
+    const lifecycle=eventLifecycle(this,id);
+    if(write&&lifecycle.archived)fail("event_archived",409);
+    return {...row,...lifecycle};
   }
-  events(actor: Actor) {
+  canonicalEvent(id:string){return canonicalEvent(this,id);}
+  ticketEventIds(id:string){return [id,...this.rows("SELECT DISTINCT event_id FROM audit WHERE action='event_merge'").map(row=>row.event_id).filter(source=>this.canonicalEvent(source)===id)];}
+  archiveEvent(actor:Actor,id:string,reason:string,key:string){return archiveEvent(this,actor,id,reason,key);}
+  restoreEvent(actor:Actor,id:string,reason:string,key:string){return archiveEvent(this,actor,id,reason,key,true);}
+  previewEventMerge(actor:Actor,sourceId:string,targetId:string){return previewEventMerge(this,actor,sourceId,targetId);}
+  mergeEvent(actor:Actor,sourceId:string,targetId:string,fingerprint:string,key:string){return mergeEvent(this,actor,sourceId,targetId,fingerprint,key);}
+  events(actor: Actor, includeArchived=false) {
     return this.rows("SELECT id FROM events ORDER BY starts_at DESC")
       .filter((r) => actor.role === "Admin" || actor.events.includes(r.id))
+      .filter(r=>includeArchived||!eventLifecycle(this,r.id).archived)
       .map((r) => ({
         ...this.event(actor, r.id),
+        aliases: this.rows('SELECT external_event_id FROM form_event_mappings WHERE event_id=? ORDER BY external_event_id',r.id).map(row=>row.external_event_id),
         ...this.summary(actor, r.id),
       }));
   }
@@ -198,7 +210,7 @@ export class ReceptionStore {
   }
   updateEvent(actor: Actor, eventId: string, body: any, key: string) {
     this.admin(actor);
-    this.event(actor, eventId, true);
+    const previous = this.event(actor, eventId, true);
     const title = text(body.title),
       venue = text(body.venue),
       starts = Date.parse(body.startsAt),
@@ -220,6 +232,9 @@ export class ReceptionStore {
       key,
       digest(JSON.stringify(["event_update", eventId, body])),
       () => {
+        if (this.row("SELECT 1 FROM audit WHERE event_id=? AND action='event_merge_receive' LIMIT 1",eventId) &&
+            new Date(starts).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}) !== new Date(previous.startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}))
+          fail('merge_date_mismatch',409);
         if (body.capacity < this.summary(actor, eventId).checkedIn)
           fail("capacity_reached", 409);
         this.run(

@@ -564,3 +564,14 @@ test("a committed PASS receipt retries without reverifying a consumed or unavail
     await h.close();
   }
 });
+test('participant private link API requires authentication, scoped write role, idempotency and real registration',async()=>{
+ const h=await harness();try{
+ const body={eventId:h.event.id,participantId:h.participant.id};assert.equal((await h.call('/api/v2/participant-link','POST',body)).status,401);
+ const viewer=await h.login('viewer');assert.equal((await h.call('/api/v2/participant-link','POST',body,viewer)).status,403);
+ const staff=await h.login('staff'),key=crypto.randomUUID();const first=await h.call('/api/v2/participant-link','POST',body,staff,h.config.origin,key);assert.equal(first.status,200);const link=await first.json();assert.match(link.url,/\/ticket\/#([a-f0-9]{64})$/);
+ const replay=await h.call('/api/v2/participant-link','POST',body,staff,h.config.origin,key);assert.deepEqual(await replay.json(),link);
+ const raw=link.url.split('#')[1];const ticket=await fetch(h.config.origin+'/api/v2/line/ticket',{headers:{Authorization:'Bearer '+raw}});assert.equal(ticket.status,200);const page=await ticket.json();assert.equal(page.name,'API Yuki');assert.equal(page.event.title,h.event.title);assert.match(page.qr,/<svg/);
+ assert.equal((await h.call('/api/v2/participant-link','POST',{...body,participantId:undefined},staff)).status,400);
+ assert.equal((await h.call('/api/v2/participant-link','POST',{...body,eventId:crypto.randomUUID()},staff)).status,403);
+ }finally{await h.close();}
+});

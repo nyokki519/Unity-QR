@@ -116,7 +116,7 @@ test("LINE accepted code assigns submitted name/event once and refuses another L
     db.close();
   }
 });
-test("unconfirmed, unmapped and expired claims cannot create participants; mapping requires Admin", () => {
+test("unconfirmed and expired claims cannot create participants; mapping requires Admin", () => {
   const { db, ev, token, data, claims } = fixture();
   try {
     const line = new LineService(db, {
@@ -127,7 +127,6 @@ test("unconfirmed, unmapped and expired claims cannot create participants; mappi
     assert.match(line.respond(message(token))[0].text, /確認|受理/);
     assert.equal(db.row("SELECT count(*) n FROM participants").n, 0);
     claims.accept(data);
-    assert.match(line.respond(message(token))[0].text, /運営|準備/);
     assert.throws(
       () => claims.map({ ...admin, role: "Staff" }, {}, randomUUID()),
       /forbidden/,

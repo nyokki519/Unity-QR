@@ -3,6 +3,7 @@ import { resolve, dirname } from "node:path";
 
 // Never publish a checkout or its data directory as a static asset root.
 const files = [
+  "assets/unity-logo.webp",
   "index.html",
   "app.js",
   "style.css",

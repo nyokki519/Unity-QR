@@ -153,7 +153,7 @@ export class LineService {
         (all ? "" : " AND s.opens_at<=? AND s.closes_at>?") +
         " ORDER BY e.starts_at LIMIT 51",
       ...(all ? [time] : [time, time, time]),
-    );
+    ).filter(event=>!this.db.event(system,event.id).archived);
   }
   private choice(events: any[], action: string): Message[] {
     return [
@@ -186,17 +186,10 @@ export class LineService {
       subject,
     );
     const input = e.type === "postback" ? e.postback?.data : e.message?.text;
-    if (typeof input !== "string" || input.length > 500)
-      return reply(
-        "「参加希望」「QR再発行」「参加確認」「キャンセル」と送ってください。",
-      );
+    if (typeof input !== "string" || input.length > 500) return [];
     const command = input.trim();
-    const submission = /^参加QR\s+([a-f0-9]{64})$/.exec(command);
-    if (e.type === "message" && command.startsWith("参加QR")) {
-      if (!submission)
-        return reply(
-          "申込専用コードを確認できません。申込画面のボタンからメッセージを送ってください。",
-        );
+    const submission = /^(?:参加QR|参加希望)\s+([a-f0-9]{64})$/.exec(command);
+    if (e.type === "message" && submission) {
       try {
         const accepted = new FormClaims(this.db).redeem(submission[1], subject);
         const token = randomBytes(32).toString("hex");
@@ -208,10 +201,11 @@ export class LineService {
           Date.parse(accepted.event.closesAt) + 7 * 86400000,
         );
         return reply(
+          "参加申込を確認できました。\nイベント詳細は後ほど共有します。\n\n" +
           accepted.event.title +
             "\n参加者：" +
             accepted.person.name +
-            "\n申込情報を確認しました。受付でQRを提示してください。\n" +
+            "\n\n受付で以下のページのQRをご提示ください。\n" +
             this.cfg.origin +
             "/ticket/#" +
             token +
@@ -219,10 +213,14 @@ export class LineService {
         );
       } catch (error) {
         const messages: Record<string, string> = {
+          event_archived: "このイベントは中止・削除されているためQRを発行できません。運営へお問い合わせください。",
           claim_pending:
             "Googleでの申込受理をまだ確認できません。少し待って同じ申込メッセージを送ってください。",
+          claim_registration_pending:
+            "申込名簿との紐づけを確認中です。運営の受付更新後に、同じ申込メッセージをもう一度送ってください。",
+          claim_event_ambiguous: "申込は確認できました。同日のイベント候補が複数あるため、運営による確認が必要です。再申込せずお問い合わせください。",
           claim_event_pending:
-            "申込は確認できました。イベントの受付準備中です。運営へお問い合わせください。",
+            "申込確認できました。イベントの受付準備中です。",
           claim_used:
             "この申込コードは別のLINEで使用済みです。運営へお問い合わせください。",
           registration_cancelled:
@@ -241,7 +239,7 @@ export class LineService {
     let action =
       command === "キャンセル"
         ? "cancel"
-        : ["QR", "QR再発行", "参加確認"].includes(command)
+        : ["参加QR", "QR", "QR再発行", "参加確認"].includes(command)
           ? "ticket"
           : "register";
     let selected: string | undefined;
@@ -264,42 +262,45 @@ export class LineService {
     let supplied: string | undefined;
     if (
       e.type === "message" &&
-      !["参加希望", "QR", "QR再発行", "参加確認", "キャンセル"].includes(
+      !["参加希望", "参加QR", "QR", "QR再発行", "参加確認", "キャンセル"].includes(
         command,
       )
     ) {
-      if (pending && pending.expires_at > Date.now()) {
+      const suppliedName = /^名前[：:\s]+(.+)$/.exec(command);
+      if (pending && pending.expires_at > Date.now() && suppliedName) {
         selected = pending.event_id;
         action = "register";
         try {
-          supplied = text(command, 60);
+          supplied = text(suppliedName[1], 60);
         } catch {
           return reply("お名前は60文字以内で入力してください。");
         }
       } else {
-        this.db.run(
+        if (pending && pending.expires_at <= Date.now()) this.db.run(
           "DELETE FROM line_conversations WHERE subject_hash=?",
           subject,
         );
-        return reply(
-          "「参加希望」「QR再発行」「参加確認」「キャンセル」と送ってください。",
-        );
+        return [];
       }
     }
-    let events = this.events(action !== "register");
-    if (action !== "register") {
-      if (!identity)
-        return reply(
-          "まだ参加登録がありません。「参加希望」と送ってください。",
-        );
-      events = events.filter((ev) =>
-        this.db.row(
-          "SELECT status FROM registrations WHERE event_id=? AND participant_id=?",
-          ev.id,
-          identity.participant_id,
-        ),
-      );
+    let owned = this.db.rows(`SELECT DISTINCT e.*,c.participant_id ownedParticipant,r.status registrationStatus FROM form_claims c JOIN registrations r ON r.participant_id=c.participant_id JOIN events e ON e.id=r.event_id LEFT JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE c.subject_hash=? AND c.event_date=strftime('%Y-%m-%d',e.starts_at,'+9 hours') AND (m.event_id=e.id OR (m.event_id IS NULL AND e.source='analytics' AND e.external_id=c.external_event_id)) AND e.closes_at>? ORDER BY e.starts_at LIMIT 51`,subject,new Date().toISOString());
+    const shortRequest=e.type==='message'&&['参加QR','参加希望'].includes(command);
+    if(shortRequest){
+      owned=owned.filter(row=>row.registrationStatus==='planned');
+      const formEnabled=new FormClaims(this.db).publicConfig().enabled;
+      if(!identity&&!owned.length&&(command==='参加QR'||formEnabled))return reply('初回の申込との紐づけが必要です。申込完了画面の「LINEで参加QRを受け取る」から、専用コード付きメッセージを送ってください。再申込は不要です。');
+      const mergedRegistration=identity&&this.db.row("SELECT 1 FROM registrations r JOIN events e ON e.id=r.event_id JOIN audit a ON a.event_id=e.id AND a.action='event_merge_receive' WHERE r.participant_id=? AND e.closes_at>? LIMIT 1",identity.participant_id,new Date().toISOString());
+      if(command==='参加QR'||owned.length||formEnabled||mergedRegistration)action='ticket';
     }
+    let events = this.events(action !== "register");
+    if(action!=='register'&&identity)events.push(...this.db.rows(`SELECT DISTINCT e.* FROM events e JOIN registrations r ON r.event_id=e.id JOIN audit a ON a.event_id=e.id AND a.action='event_merge_receive' WHERE r.participant_id=? AND e.closes_at>? ORDER BY e.starts_at LIMIT 51`,identity.participant_id,new Date().toISOString()).filter(ev=>!this.db.event(system,ev.id).archived));
+    if(shortRequest&&action==='ticket')events=events.filter(ev=>identity&&this.db.row("SELECT 1 FROM registrations WHERE event_id=? AND participant_id=? AND status='planned'",ev.id,identity.participant_id));
+    if (action !== 'register') {
+      events=events.filter(ev=>identity&&this.db.row('SELECT status FROM registrations WHERE event_id=? AND participant_id=?',ev.id,identity.participant_id));
+      if(!identity&&!owned.length)return reply('まだ参加登録がありません。「参加希望」と送ってください。');
+    }
+    owned=owned.filter(ev=>!this.db.event(system,ev.id).archived);
+    const byId=new Map(events.map(ev=>[ev.id,ev]));for(const ev of owned)if(!byId.has(ev.id))byId.set(ev.id,ev);events=[...byId.values()].sort((a,b)=>a.starts_at.localeCompare(b.starts_at));
     if (!events.length)
       return reply(
         "現在、受付中のイベントがありません。運営へお問い合わせください。",
@@ -312,6 +313,14 @@ export class LineService {
       return reply(
         "このイベントは申込受付を終了したか、選択が無効になっています。「参加希望」から確認してください。",
       );
+    if(shortRequest&&action==='register'&&identity&&this.db.row("SELECT status FROM registrations WHERE event_id=? AND participant_id=?",ev.id,identity.participant_id)?.status==='cancelled'){const confirmation=this.choice([ev],'register');confirmation[0].text=ev.title+' はキャンセル済みです。再参加する場合は、下のイベントを選択して確認してください。';return confirmation;}
+    if(action==='register'&&owned.some(row=>row.id===ev.id))action='ticket';
+    if(action!=='register') {
+      const ids=new Set(owned.filter(row=>row.id===ev.id).map(row=>row.ownedParticipant));
+      if(identity&&this.db.row('SELECT 1 FROM registrations WHERE event_id=? AND participant_id=?',ev.id,identity.participant_id))ids.add(identity.participant_id);
+      if(ids.size!==1)return reply('このイベントの参加登録が複数あります。運営へお問い合わせください。');
+      identity={participant_id:[...ids][0]};
+    }
     if (action === "cancel") {
       if (
         this.db.row(
@@ -377,7 +386,7 @@ export class LineService {
         );
         return reply(
           ev.title +
-            " に参加するお名前を入力してください（60文字以内・15分以内）。",
+            " に参加するお名前を「名前：山田太郎」の形式で入力してください（60文字以内・15分以内）。",
         );
       }
       const outcome = this.db.sql.transaction(() => {
@@ -464,6 +473,7 @@ export class LineService {
       identity.participant_id,
     );
     return reply(
+      "参加申込を確認できました。\nイベント詳細は後ほど共有します。\n\n" +
       ev.title +
         "\n" +
         new Date(ev.starts_at).toLocaleString("ja-JP", {
@@ -480,6 +490,20 @@ export class LineService {
         "\nこのリンクは本人用です。他の方に転送しないでください。",
     );
   }
+  issueParticipantLink(actor: Actor,eventId:string,participantId:string,key:string) {
+    eventId=text(eventId,120);participantId=text(participantId,120);
+    this.db.event(actor,eventId,true);
+    if(actor.role!=='Admin'&&actor.role!=='Staff')fail('forbidden',403);
+    const person=this.db.person(actor,eventId,participantId,true),event=this.db.event(actor,eventId);
+    if(person.status==='cancelled')fail('registration_cancelled',409);
+    if(Date.parse(event.closesAt)<=Date.now())fail('event_closed',410);
+    return this.db.mutate(actor,key,JSON.stringify(['participant-link',eventId,participantId]),()=>{
+      const token=randomBytes(32).toString('hex'),expiresAt=Date.parse(event.closesAt)+7*86400000;
+      this.db.run('INSERT INTO line_tickets VALUES(?,?,?,?)',digest(token),eventId,participantId,expiresAt);
+      this.db.audit(actor,'participant_link',eventId,participantId);
+      return {url:this.cfg.origin+'/ticket/#'+token,expiresAt};
+    });
+  }
   ticket(token: string): {
     name: string;
     event: any;
@@ -495,8 +519,9 @@ export class LineService {
       Date.now(),
     );
     if (!row) fail("ticket_not_found", 404);
-    const event = this.db.event(system, row.event_id),
-      p = this.db.person(system, row.event_id, row.participant_id);
+    const eventId=this.db.canonicalEvent(row.event_id);
+    const event = this.db.event(system, eventId),
+      p = this.db.person(system, eventId, row.participant_id);
     const base = {
       name: p.name,
       event: {
@@ -507,6 +532,7 @@ export class LineService {
         venue: event.venue,
       },
     };
+    if (event.archived) return {...base,status:"archived"};
     if (p.status === "cancelled") return { ...base, status: "cancelled" };
     if (p.status === "checkedIn") return { ...base, status: "checkedIn" };
     if (Date.parse(event.closesAt) <= Date.now())
@@ -522,7 +548,7 @@ export class LineService {
       status: "planned",
       token: signTicket(
         this.cfg.signingKey,
-        row.event_id,
+        eventId,
         row.participant_id,
         expiresAt,
       ),

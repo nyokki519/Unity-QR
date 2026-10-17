@@ -154,7 +154,7 @@ function validateRow(table: string, row: Record<string, any>) {
       fail("invalid_migration");
     if (
       table === "form_claims" &&
-      (row.participant_id === null) !== (row.subject_hash === null)
+      row.subject_hash !== null && row.participant_id === null
     )
       fail("invalid_migration");
   }
@@ -302,6 +302,18 @@ function validate(input: any): asserts input is OwnedSnapshot {
       !/^scrypt\$[a-f0-9]{32}\$[a-f0-9]{128}$/.test(user.password_hash)
     )
       fail("invalid_migration");
+  const eventIds=new Set(input.tables.events.map((e:any)=>e.id)),edges=new Map<string,string>();
+  const actions=[...input.tables.audit].sort((a:any,b:any)=>a.id-b.id);
+  for(const row of actions){
+    if(!['event_archive','event_restore','event_merge','event_merge_receive'].includes(row.action))continue;
+    if(!eventIds.has(row.event_id)||row.participant_id!==null)fail('invalid_migration');
+    if(row.action==='event_merge'||row.action==='event_merge_receive'){
+      const details=parsedObject(row.reason),other=row.action==='event_merge'?details.targetId:details.sourceId;
+      if(!eventIds.has(other)||other===row.event_id)fail('invalid_migration');
+      if(row.action==='event_merge')edges.set(row.event_id,other);
+    }
+  }
+  for(const source of edges.keys()){let id=source;const seen=new Set<string>();for(let hops=0;;hops++){if(hops>=50||seen.has(id))fail('invalid_migration');seen.add(id);const next=edges.get(id);if(!next)break;id=next;}}
 }
 export function importOwnedSnapshot(db: ReceptionStore, input: unknown) {
   validate(input);

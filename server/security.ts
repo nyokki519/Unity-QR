@@ -66,7 +66,7 @@ export function signTicket(
 export function verifyTicket(
   key: string,
   token: string,
-  eventId: string,
+  eventId: string | readonly string[],
   now = Date.now(),
 ) {
   if (
@@ -94,7 +94,7 @@ export function verifyTicket(
     data.aud !== "reception" ||
     typeof data.participantId !== "string" ||
     !data.participantId ||
-    data.eventId !== eventId
+    !(Array.isArray(eventId) ? eventId.includes(data.eventId) : data.eventId === eventId)
   )
     fail("invalid_qr");
   if (

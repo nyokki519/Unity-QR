@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { chromium, webkit, expect } from "playwright/test";
 const server = createServer((req, res) => {
   const files: Record<string, string> = {
+    "/assets/unity-logo.webp": "../assets/unity-logo.webp",
     "/ticket/": "ticket.html",
     "/ticket/ticket.js": "ticket.js",
     "/ticket/ticket.css": "ticket.css",
@@ -25,7 +26,9 @@ const server = createServer((req, res) => {
   }
   res.setHeader(
     "Content-Type",
-    file.endsWith(".js")
+    file.endsWith(".webp")
+      ? "image/webp"
+      : file.endsWith(".js")
       ? "text/javascript"
       : file.endsWith(".css")
         ? "text/css"
