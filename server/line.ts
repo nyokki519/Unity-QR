@@ -186,17 +186,10 @@ export class LineService {
       subject,
     );
     const input = e.type === "postback" ? e.postback?.data : e.message?.text;
-    if (typeof input !== "string" || input.length > 500)
-      return reply(
-        "「参加希望」「QR再発行」「参加確認」「キャンセル」と送ってください。",
-      );
+    if (typeof input !== "string" || input.length > 500) return [];
     const command = input.trim();
     const submission = /^(?:参加QR|参加希望)\s+([a-f0-9]{64})$/.exec(command);
-    if (e.type === "message" && /^(?:参加QR|参加希望)\s+/.test(command)) {
-      if (!submission)
-        return reply(
-          "申込専用コードを確認できません。申込画面のボタンからメッセージを送ってください。",
-        );
+    if (e.type === "message" && submission) {
       try {
         const accepted = new FormClaims(this.db).redeem(submission[1], subject);
         const token = randomBytes(32).toString("hex");
@@ -273,22 +266,21 @@ export class LineService {
         command,
       )
     ) {
-      if (pending && pending.expires_at > Date.now()) {
+      const suppliedName = /^名前[：:\s]+(.+)$/.exec(command);
+      if (pending && pending.expires_at > Date.now() && suppliedName) {
         selected = pending.event_id;
         action = "register";
         try {
-          supplied = text(command, 60);
+          supplied = text(suppliedName[1], 60);
         } catch {
           return reply("お名前は60文字以内で入力してください。");
         }
       } else {
-        this.db.run(
+        if (pending && pending.expires_at <= Date.now()) this.db.run(
           "DELETE FROM line_conversations WHERE subject_hash=?",
           subject,
         );
-        return reply(
-          "「参加希望」「QR再発行」「参加確認」「キャンセル」と送ってください。",
-        );
+        return [];
       }
     }
     let owned = this.db.rows(`SELECT DISTINCT e.*,c.participant_id ownedParticipant,r.status registrationStatus FROM form_claims c JOIN registrations r ON r.participant_id=c.participant_id JOIN events e ON e.id=r.event_id LEFT JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE c.subject_hash=? AND c.event_date=strftime('%Y-%m-%d',e.starts_at,'+9 hours') AND (m.event_id=e.id OR (m.event_id IS NULL AND e.source='analytics' AND e.external_id=c.external_event_id)) AND e.closes_at>? ORDER BY e.starts_at LIMIT 51`,subject,new Date().toISOString());
@@ -394,7 +386,7 @@ export class LineService {
         );
         return reply(
           ev.title +
-            " に参加するお名前を入力してください（60文字以内・15分以内）。",
+            " に参加するお名前を「名前：山田太郎」の形式で入力してください（60文字以内・15分以内）。",
         );
       }
       const outcome = this.db.sql.transaction(() => {
