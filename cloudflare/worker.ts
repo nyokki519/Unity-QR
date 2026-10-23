@@ -1,3 +1,4 @@
+import {resetLoginLimitOnce} from '../server/login-reset.js';
 import type {
   DurableObjectState,
   DurableObjectNamespace,
@@ -20,6 +21,7 @@ export interface CloudEnv {
   ASSETS: { fetch(request: Request): Promise<Response> };
   QR_SIGNING_KEY?: string;
   QR_SETUP_TOKEN?: string;
+  QR_LOGIN_RESET_REVISION?: string;
   QR_ORIGIN?: string;
   QR_FORM_SECRET?: string;
   LINE_CHANNEL_ID?: string;
@@ -82,6 +84,7 @@ export class QRReception {
     this.db.sql.exec(
       "CREATE INDEX IF NOT EXISTS _qr_login_expiry ON _qr_login_attempts(expires)",
     );
+    resetLoginLimitOnce(this.db,this.env.QR_LOGIN_RESET_REVISION);
     this.attempts = {
       get: (ip) =>
         this.db.row(

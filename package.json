@@ -7,7 +7,7 @@
     "test:unit": "tsx --test tests/*.test.ts",
     "test:legacy": "node tests/browser.cjs",
     "test:ops": "tsx tests/ops-browser.ts",
-    "test:cloud": "npm run cloud:build && node --test tests/cloudflare.cjs tests/cloud-line.cjs",
+    "test:cloud": "npm run cloud:build && node --test tests/cloudflare.cjs tests/cloud-line.cjs tests/cloud-login-reset.cjs",
     "cloud:build": "npm run build && node scripts/cloud-assets.mjs && wrangler deploy --dry-run --outdir dist/cloudflare-worker",
     "cloud:deploy": "npm run cloud:build && node dist/scripts/cloud-deploy.js",
     "typecheck": "tsc --noEmit",
