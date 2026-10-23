@@ -1,3 +1,4 @@
+import {handleOperatorMaintenance} from '../server/operator-maintenance.js';
 import {resetLoginLimitOnce} from '../server/login-reset.js';
 import type {
   DurableObjectState,
@@ -22,6 +23,8 @@ export interface CloudEnv {
   QR_SIGNING_KEY?: string;
   QR_SETUP_TOKEN?: string;
   QR_LOGIN_RESET_REVISION?: string;
+  QR_MAINTENANCE_TOKEN?: string;
+  QR_MAINTENANCE_EXPIRES_AT?: string;
   QR_ORIGIN?: string;
   QR_FORM_SECRET?: string;
   LINE_CHANNEL_ID?: string;
@@ -141,6 +144,7 @@ export class QRReception {
     try {
       const url = new URL(request.url),
         cfg = this.config(url.origin);
+      if(url.pathname.startsWith("/api/v2/maintenance/"))return handleOperatorMaintenance(request,this.db,this.env.QR_MAINTENANCE_TOKEN,this.env.QR_MAINTENANCE_EXPIRES_AT);
       if (url.pathname === "/api/v2/setup" && request.method === "POST") {
         const provided = request.headers.get("authorization") || "";
         if (
