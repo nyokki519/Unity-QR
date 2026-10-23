@@ -1,0 +1,11 @@
+# Durable QR → STUDIO LINE relay
+
+Keep the existing QR webhook URL, direct-message registration and Analytics delivery intact. Forward only explicitly allowlisted group image/video and unsend events to the fixed Studio endpoint; do not send LINE replies from the relay. New-media forwarding disabled by default. No new paid services.
+
+Use the existing SQLite Durable Object: persist minimized, per-event envelopes after verifying the original LINE signature and before webhook ACK. Re-sign exact minimized bytes with the existing LINE channel secret when delivering to Studio. Do not retain text, reply tokens, user IDs, names, access tokens or raw mixed bodies. Destination is a code constant, redirects forbidden. Studio retains its own independent group allowlist and signature check.
+
+Alternatives: synchronous forwarding couples QR availability to Studio and loses work after ACK; waitUntil without durable state loses pending delivery on interruption. Chosen by implementer under user's autonomous authorization: additive SQLite outbox with alarm, bounded retries and fencing. Fail closed on full queue rather than silently ACKing lost media; QR commands in a mixed rejected request are redelivered by LINE.
+
+Limits: 100 new media/day UTC,1000 retained records,4 deliveries/alarm,5sec/request,60sec lease,12 attempts, media expires24h/unsend7days, dedup records7days. Revocation cancels pending media for the same group/message; no automatic resurrection. Payload cleared on completion or expiry. Configure STUDIO_RELAY_ENABLED=true and STUDIO_ALLOWED_GROUP_IDS explicitly before accepting group events. No automatic group discovery. Media-enable/allowlist removal must not suppress revocation: retain nonraw accepted group hashes separately and continue unsend handling for explicit or historical groups, even after per-message queue pruning. Studio only permits historical cancellation for an existing matching message_id/group_hash.
+
+Deployment requires exact deployed-source match, preservation of current bindings/assets/secrets and existing QR backup/recovery procedure. If existing QR admin backup credentials are unavailable, finish tests and push the reviewable feature branch without replacing the live service. Do not alter webhook URL or turn on Studio ingestion yet.

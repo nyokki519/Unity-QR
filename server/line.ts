@@ -1,3 +1,4 @@
+import {enqueueStudioEvents,type StudioRelayConfig} from './studio-relay.js';
 import {
   createHmac,
   randomBytes,
@@ -15,7 +16,7 @@ import {
   signTicket,
   text,
 } from "./security.js";
-export type LineConfig = {
+export type LineConfig = StudioRelayConfig & {
   origin: string;
   signingKey: string;
   lineChannelId?: string;
@@ -98,6 +99,11 @@ export class LineService {
         this.cfg.lineAccessToken &&
         this.cfg.lineChannelId
       ),
+      studioRelay: {
+        enabled: this.cfg.studioRelayEnabled === true,
+        allowedGroupCount: new Set((this.cfg.studioAllowedGroupIds??'').split(',').map(s=>s.trim()).filter(s=>/^C[a-f0-9]{32}$/.test(s))).size,
+        counts: Object.fromEntries(this.db.rows("SELECT status,COUNT(*) count FROM studio_relay_outbox GROUP BY status").map(r=>[r.status,r.count])),
+      },
       channelIdConfigured: !!this.cfg.lineChannelId,
       events: this.db.rows(
         "SELECT event_id eventId,enabled,opens_at opensAt,closes_at closesAt FROM line_event_settings",
@@ -600,6 +606,7 @@ export class LineService {
         (e.type !== "message" || e.message?.type === "text")
       )
         text(e.webhookEventId, 128);
+    enqueueStudioEvents(this.db,this.cfg,body.events);
     const claimed = body.events.filter((e: any) => this.claim(e));
     const processEvents = async () => {
       await Promise.all(
