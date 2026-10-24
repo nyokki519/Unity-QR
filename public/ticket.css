@@ -1,0 +1,133 @@
+:root {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", sans-serif;
+  color: #193c32;
+  background: #f6f3eb;
+  color-scheme: light;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 520px;
+  margin: auto;
+  padding: calc(28px + env(safe-area-inset-top)) 22px
+    calc(28px + env(safe-area-inset-bottom));
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: Georgia, serif;
+  font-size: 25px;
+  letter-spacing: 3px;
+  margin-bottom: 36px;
+}
+.seal {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid #bda777;
+  border-radius: 50%;
+  font-size: 28px;
+}
+small {
+  display: block;
+  font:
+    10px/1.8 -apple-system,
+    sans-serif;
+  letter-spacing: 1px;
+}
+article {
+  padding: 28px 22px;
+  background: #fffdf7;
+  border: 1px solid #dfd9c9;
+  border-radius: 18px;
+  box-shadow: 0 12px 35px #173b3208;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #8c774e;
+}
+h1 {
+  font-family: Georgia, "Hiragino Mincho ProN", serif;
+  font-size: 28px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+h2 {
+  font-size: 19px;
+  overflow-wrap: anywhere;
+}
+#details {
+  font-size: 13px;
+  line-height: 1.9;
+  white-space: pre-line;
+}
+#status {
+  padding: 14px;
+  background: #eff2eb;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.qrArea {
+  text-align: center;
+  margin: 24px 0;
+}
+.qrArea img {
+  display: block;
+  width: min(100%, 280px);
+  height: auto;
+  margin: auto;
+  background: white;
+  padding: 10px;
+}
+.qrArea p {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.qrArea small {
+  color: #6f776f;
+}
+button {
+  width: 100%;
+  min-height: 48px;
+  border: 0;
+  border-radius: 9px;
+  background: #193c32;
+  color: #fffdf7;
+  font-size: 15px;
+  padding: 12px;
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.55;
+}
+button:focus-visible {
+  outline: 3px solid #bda777;
+  outline-offset: 3px;
+}
+.note {
+  font-size: 11px;
+  line-height: 1.9;
+  color: #73786e;
+  margin-top: 22px;
+}
+footer {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-align: center;
+  color: #8c774e;
+  margin-top: 26px;
+}
+[hidden] {
+  display: none !important;
+}
+
+.unityLogo { width: 64px; height: 64px; object-fit: contain; background: #fffaef; border: 0; border-radius: 12px; }

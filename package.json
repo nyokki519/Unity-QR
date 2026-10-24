@@ -1,0 +1,47 @@
+{
+  "name": "unity-check-in",
+  "private": true,
+  "version": "2.0.0",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:cloud && npm run test:legacy && npm run test:ops && npm run test:line-ui",
+    "test:unit": "tsx --test tests/*.test.ts",
+    "test:legacy": "node tests/browser.cjs",
+    "test:ops": "tsx tests/ops-browser.ts",
+    "test:cloud": "npm run cloud:build && node --test tests/cloudflare.cjs tests/cloud-line.cjs tests/cloud-login-reset.cjs tests/cloud-operator-maintenance.cjs",
+    "cloud:build": "npm run build && node scripts/cloud-assets.mjs && wrangler deploy --dry-run --outdir dist/cloudflare-worker",
+    "cloud:deploy": "npm run cloud:build && node dist/scripts/cloud-deploy.js",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && esbuild server/decoder.ts --bundle --format=esm --platform=browser --target=safari15 --outfile=ops/decoder.js",
+    "start": "node dist/server/main.js",
+    "dev": "tsx server/main.ts",
+    "admin:create": "node dist/server/cli.js user",
+    "backup": "node dist/server/cli.js backup",
+    "backup:verify": "node dist/server/cli.js verify",
+    "pretest": "npm run build",
+    "test:line-ui": "tsx tests/line-browser.ts",
+    "cloud:update": "npm run cloud:build && node dist/scripts/cloud-update.js",
+    "cloud:line-setup": "npm run build && node dist/scripts/cloud-configure.js",
+    "cloud:form-setup": "npm run build && node dist/scripts/cloud-configure.js --form"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261011.1",
+    "@types/node": "^26.6.5",
+    "@types/pngjs": "^6.0.5",
+    "@types/qrcode": "^1.5.6",
+    "esbuild": "^0.28.2",
+    "miniflare": "5.20261006.1-alpha",
+    "playwright": "1.62.1",
+    "pngjs": "^7.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wrangler": "4.149.0"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  }
+}
