@@ -1,0 +1,248 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { Store } from "../server/store.js";
+import { hashPassword, checkPassword } from "../server/security.js";
+import { exportSnapshot, importOwnedSnapshot } from "../server/migration.js";
+
+function source() {
+  const db = new Store(":memory:");
+  const userId = db.addUser(
+    "operator",
+    hashPassword("test-migration-password-123"),
+    "Admin",
+  );
+  const actor = { id: userId, role: "Admin" as const, events: [] };
+  const event = db.createEvent(
+    actor,
+    {
+      title: "Migration test",
+      venue: "Test only",
+      capacity: 10,
+      startsAt: new Date().toISOString(),
+      opensAt: new Date(Date.now() - 60000).toISOString(),
+      closesAt: new Date(Date.now() + 3600000).toISOString(),
+    },
+    crypto.randomUUID(),
+  );
+  const person = db.register(
+    actor,
+    event.id,
+    { name: "Test A" },
+    crypto.randomUUID(),
+  );
+  db.checkin(actor, event.id, person.id, crypto.randomUUID(), "qr");
+  db.login("operator", "test-migration-password-123");
+  return { db, actor, event, person };
+}
+
+test("cloud migration preserves IDs, password hashes, receipt, audit and outbox but excludes sessions", () => {
+  const s = source(),
+    target = new Store(":memory:");
+  try {
+    const snapshot = exportSnapshot(s.db);
+    assert.equal("sessions" in snapshot.tables, false);
+    const result = importOwnedSnapshot(target, snapshot);
+    assert.equal(result.counts.participants, 1);
+    assert.equal(
+      target.person(s.actor, s.event.id, s.person.id).status,
+      "checkedIn",
+    );
+    assert.deepEqual(target.outbox(), s.db.outbox());
+    assert.deepEqual(
+      target.history(s.actor, s.event.id),
+      s.db.history(s.actor, s.event.id),
+    );
+    assert.ok(
+      checkPassword(
+        "test-migration-password-123",
+        target.row("SELECT password_hash FROM users WHERE id=?", s.actor.id)
+          .password_hash,
+      ),
+    );
+    assert.equal(target.row("SELECT count(*) n FROM sessions").n, 0);
+    assert.ok(target.login("operator", "test-migration-password-123"));
+    assert.deepEqual(importOwnedSnapshot(target, snapshot), result);
+    assert.equal(target.row("SELECT count(*) n FROM attendance").n, 1);
+  } finally {
+    s.db.close();
+    target.close();
+  }
+});
+
+test("migration refuses nonempty destinations instead of merging or overwriting", () => {
+  const s = source(),
+    target = new Store(":memory:");
+  try {
+    target.addUser(
+      "existing",
+      hashPassword("test-existing-password-123"),
+      "Admin",
+    );
+    assert.throws(
+      () => importOwnedSnapshot(target, exportSnapshot(s.db)),
+      /destination_not_empty/,
+    );
+    assert.equal(target.row("SELECT username FROM users").username, "existing");
+    assert.equal(target.row("SELECT count(*) n FROM events").n, 0);
+  } finally {
+    s.db.close();
+    target.close();
+  }
+});
+
+test("broken foreign keys roll back the entire import and permit a corrected retry", () => {
+  const s = source(),
+    target = new Store(":memory:");
+  try {
+    const broken = structuredClone(exportSnapshot(s.db));
+    broken.tables.registrations[0].participant_id = "missing-participant";
+    assert.throws(() => importOwnedSnapshot(target, broken));
+    assert.equal(target.row("SELECT count(*) n FROM users").n, 0);
+    assert.equal(target.row("SELECT count(*) n FROM events").n, 0);
+    assert.equal(target.row("SELECT count(*) n FROM _qr_imports").n, 0);
+    assert.equal(
+      importOwnedSnapshot(target, exportSnapshot(s.db)).counts.attendance,
+      1,
+    );
+  } finally {
+    s.db.close();
+    target.close();
+  }
+});
+
+test("migration rejects unknown tables, credentials with unsupported hashes and snapshots without an enabled Admin", () => {
+  const s = source(),
+    target = new Store(":memory:");
+  try {
+    const snapshot = exportSnapshot(s.db);
+    assert.throws(
+      () =>
+        importOwnedSnapshot(target, {
+          ...snapshot,
+          tables: { ...snapshot.tables, secrets: [] },
+        }),
+      /invalid_migration/,
+    );
+    const badHash = structuredClone(snapshot);
+    badHash.tables.users[0].password_hash = "plaintext";
+    assert.throws(
+      () => importOwnedSnapshot(target, badHash),
+      /invalid_migration/,
+    );
+    const noAdmin = structuredClone(snapshot);
+    noAdmin.tables.users[0].enabled = 0;
+    assert.throws(
+      () => importOwnedSnapshot(target, noAdmin),
+      /invalid_migration/,
+    );
+    assert.equal(target.row("SELECT count(*) n FROM users").n, 0);
+  } finally {
+    s.db.close();
+    target.close();
+  }
+});
+test("null or mistyped identifiers and broken structured payloads cannot commit or lock out the migrated Admin", () => {
+  const s = source(),
+    target = new Store(":memory:");
+  try {
+    for (const [table, column, value] of [
+      ["users", "id", null],
+      ["events", "id", null],
+      ["participants", "id", null],
+      ["users", "id", 42],
+      ["users", "username", 42],
+      ["registrations", "event_id", null],
+      ["outbox", "payload", "not JSON"],
+    ] as const) {
+      const broken = structuredClone(exportSnapshot(s.db));
+      broken.tables[table][0][column] = value;
+      assert.throws(
+        () => importOwnedSnapshot(target, broken),
+        /invalid_migration/,
+        `${table}.${column}`,
+      );
+      assert.equal(target.row("SELECT count(*) n FROM users").n, 0);
+      assert.equal(target.row("SELECT count(*) n FROM _qr_imports").n, 0);
+    }
+    importOwnedSnapshot(target, exportSnapshot(s.db));
+    const token = target.login("operator", "test-migration-password-123");
+    assert.equal(target.session(token)?.id, s.actor.id);
+  } finally {
+    s.db.close();
+    target.close();
+  }
+});
+
+test("schema 4 backup restores LINE identity and ticket state; legacy schema 2 still imports", () => {
+  const source = new Store(":memory:");
+  const target = new Store(":memory:");
+  const legacyTarget = new Store(":memory:");
+  try {
+    source.addUser(
+      "line-backup",
+      hashPassword("test-only-backup-password"),
+      "Admin",
+    );
+    const actor: any = { id: "test", role: "Admin", events: [] };
+    const e = source.createEvent(
+      actor,
+      {
+        title: "Backup LINE",
+        venue: "Tokyo",
+        startsAt: new Date().toISOString(),
+        opensAt: new Date().toISOString(),
+        closesAt: new Date(Date.now() + 3600000).toISOString(),
+        capacity: 10,
+      },
+      crypto.randomUUID(),
+    );
+    const p = source.register(
+      actor,
+      e.id,
+      { name: "LINE fixture" },
+      crypto.randomUUID(),
+    );
+    source.run(
+      "INSERT INTO line_identities VALUES(?,?,?)",
+      "a".repeat(64),
+      p.id,
+      new Date().toISOString(),
+    );
+    source.run(
+      "INSERT INTO line_tickets VALUES(?,?,?,?)",
+      "b".repeat(64),
+      e.id,
+      p.id,
+      Date.now() + 60000,
+    );
+    const snapshot = exportSnapshot(source);
+    assert.equal(snapshot.schemaVersion, 4);
+    importOwnedSnapshot(target, snapshot);
+    assert.equal(target.row("SELECT count(*) n FROM line_identities").n, 1);
+    assert.equal(target.row("SELECT count(*) n FROM line_tickets").n, 1);
+    const old: any = structuredClone(snapshot);
+    old.schemaVersion = 2;
+    for (const table of Object.keys(old.tables))
+      if (table.startsWith("line_") || table.startsWith("form_")) delete old.tables[table];
+    importOwnedSnapshot(legacyTarget, old);
+    assert.equal(legacyTarget.row("SELECT count(*) n FROM participants").n, 1);
+    assert.equal(
+      legacyTarget.row("SELECT count(*) n FROM line_identities").n,
+      0,
+    );
+  } finally {
+    source.close();
+    target.close();
+    legacyTarget.close();
+  }
+});
+test('backup restores an accepted form linked by Analytics before its first LINE redemption',async()=>{
+ const {FormClaims,japanDate}=await import('../server/form-claims.js');const {importSnapshot}=await import('../server/integrations.js');const {digest}=await import('../server/security.js');
+ const s=source(),target=new Store(':memory:');try{
+ const raw='a'.repeat(64),hash=digest(raw),forms=new FormClaims(s.db);forms.accept({claimHash:hash,receiptHash:digest('accepted'),name:'Test B',eventId:'form-event',eventName:s.event.title,eventDate:japanDate(s.event.startsAt)});
+ importSnapshot(s.db,s.actor,{version:1,events:[{externalId:'sheet-event',receptionId:s.event.id,title:s.event.title,venue:s.event.venue,startsAt:s.event.startsAt,opensAt:s.event.opensAt,closesAt:s.event.closesAt,capacity:10}],participants:[{externalId:'sheet-person',name:'Test B',claimHash:hash}],registrations:[{eventExternalId:'sheet-event',participantExternalId:'sheet-person'}]});
+ const before=s.db.row('SELECT participant_id,subject_hash FROM form_claims');assert(before.participant_id);assert.equal(before.subject_hash,null);
+ importOwnedSnapshot(target,exportSnapshot(s.db));assert.deepEqual(target.row('SELECT participant_id,subject_hash FROM form_claims'),before);
+ const claim=new FormClaims(target).redeem(raw,'b'.repeat(64));assert.equal(claim.person.id,before.participant_id);
+ }finally{s.db.close();target.close();}
+});

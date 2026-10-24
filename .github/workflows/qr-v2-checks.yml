@@ -1,0 +1,24 @@
+name: Unity QR validation
+on:
+  pull_request:
+  push:
+    branches: [feature/unity-qr-v2, feature/line-auto-registration]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:legacy && npm run test:ops && npm run test:line-ui
+        env:
+          BROWSER_ENGINE: webkit

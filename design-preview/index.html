@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unity CHECK-IN — デザインプレビュー</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f2efe7;color:#1a1a15;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans",sans-serif}main{max-width:1200px;margin:auto;padding:48px 24px 72px}header{border-bottom:1px solid #c9c3b6;padding-bottom:28px;margin-bottom:36px}.eyebrow{font-size:12px;letter-spacing:.2em}h1{font-size:clamp(26px,5vw,40px);font-weight:500}header p{line-height:1.8;color:#625e54}nav{display:flex;gap:20px;flex-wrap:wrap}a{color:inherit;text-underline-offset:5px}.mobile-pair{display:grid;grid-template-columns:1fr 1fr;gap:40px}section{scroll-margin-top:24px;margin-bottom:48px}h2{font-size:20px;font-weight:500}section p{color:#625e54;line-height:1.7}.mobile-pair img{display:block;width:100%;max-width:390px;margin:auto}.desktop img{display:block;width:100%;height:auto}.image-link{display:block;margin-top:16px;font-size:14px}footer{border-top:1px solid #c9c3b6;padding-top:24px;font-size:14px;line-height:1.8}@media(max-width:700px){main{padding:28px 20px 48px}.mobile-pair{grid-template-columns:1fr;gap:0}}
+</style>
+</head>
+<body><main>
+<header><div class="eyebrow">UNITY · DESIGN PREVIEW</div><h1>QR受付から、来場の記録へ。</h1><p>参加者向けの受付・完了画面と、Unity Analyticsに追加する運営向けの来場一覧です。<br>デザイン画像のプレビューです。名前・人数は架空のサンプルで、LINE認証やデータ保存はまだ動作しません。</p><nav aria-label="画面一覧"><a href="#arrival">受付の入口</a><a href="#complete">CHECK-IN完了</a><a href="#attendance">運営側の来場一覧</a></nav></header>
+<div class="mobile-pair">
+<section id="arrival"><h2>1. LINE受付の入口</h2><p>会場のQRを読み取った後、イベントを確認し、LINEで本人確認を始めます。</p><a href="arrival.png"><img src="arrival.png" alt="紙色の背景にUnityロゴ、イベント情報、LINEで受付をはじめるボタンを配置した受付画面" width="853" height="1844"></a><a class="image-link" href="arrival.png">画像を大きく開く ↗</a></section>
+<section id="complete"><h2>2. CHECK-IN完了</h2><p>来場が記録されたことを伝え、参加回数とMY UNITYへの入口を表示します。</p><a href="complete.png"><img src="complete.png" alt="墨色の背景にCHECKED IN、名前、イベント、受付時刻とMY UNITYボタンを表示した完了画面" width="853" height="1844"></a><a class="image-link" href="complete.png">画像を大きく開く ↗</a></section>
+</div>
+<section id="attendance" class="desktop"><h2>3. 運営側の来場一覧</h2><p>イベントごとの実来場、初参加・リピーター、参加者ごとの累計来場と受付時刻を確認する画面です。</p><a href="attendance.png"><img src="attendance.png" alt="Unity Analyticsの来場記録画面。来場24人、初参加9人、リピーター15人と参加者一覧を表示" width="1487" height="1058"></a><a class="image-link" href="attendance.png">画像を大きく開く ↗</a></section>
+<footer><a href="../">既存のCHECK-INデモへ</a><p>実装前のデザインプレビュー。画像内の日付・曜日等の表記は実装時に実データに合わせます。</p></footer>
+</main></body></html>
