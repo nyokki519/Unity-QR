@@ -206,6 +206,7 @@ export function createHandler(
         if (path.pathname === "/api/v2/session" && method === "GET")
           return json(res, {
             role: actor.role,
+            username: actor.username,
             events: actor.events,
             features: {sheetReception:1,similarEventAliases:1,eventOrganization:1,selfPasswordChange:1},
             ...(cfg.pollIntervalMs
@@ -230,10 +231,10 @@ export function createHandler(
           }
           current.count++;
           attempts.set(attemptKey, current);
-          db.changeOwnPassword(actor, input.currentPassword, input.newPassword);
+          const changed = db.changeOwnPassword(actor, input.currentPassword, input.newPassword);
           attempts.delete(attemptKey);
           setCookie("", 0);
-          return json(res, { ok: true });
+          return json(res, { ok: true, username: changed.username });
         }
         if (path.pathname === "/api/v2/events") {
           if (method === "GET") {const includeArchived=path.searchParams.get("includeArchived")==="1";if(includeArchived)db.admin(actor);return json(res, { events: db.events(actor,includeArchived) });}

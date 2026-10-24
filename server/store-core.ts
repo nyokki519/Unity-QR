@@ -4,6 +4,7 @@ import { checkPassword, hashPassword, digest, fail, text } from "./security.js";
 import type { SqlDriver } from "./storage.js";
 export type Actor = {
   id: string;
+  username?: string;
   role: "Admin" | "Staff" | "Viewer";
   events: readonly string[];
 };
@@ -641,6 +642,7 @@ export class ReceptionStore {
       this.run("DELETE FROM sessions WHERE user_id=?", actor.id);
       this.audit(actor, "password_change", null, null);
     });
+    return { username: user.username as string };
   }
   session(token: string): Actor | null {
     if (!token || token.length > 128) return null;
@@ -652,6 +654,7 @@ export class ReceptionStore {
     return user
       ? {
           id: user.id,
+          username: user.username,
           role: user.role,
           events: this.rows(
             "SELECT event_id FROM user_events WHERE user_id=?",

@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "scripts": {
     "test": "npm run test:unit && npm run test:cloud && npm run test:legacy && npm run test:ops && npm run test:line-ui && npm run test:password-ui",
-    "test:password-ui": "tsx tests/self-password-browser.ts",
+    "test:password-ui": "tsx tests/self-password-browser.ts && tsx tests/password-session-race.ts",
     "test:unit": "tsx --test tests/*.test.ts",
     "test:legacy": "node tests/browser.cjs",
     "test:ops": "tsx tests/ops-browser.ts",

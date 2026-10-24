@@ -21,6 +21,7 @@ modal.addEventListener("close", () => {
     document.querySelector("#modalContent").replaceChildren();
 });
 const pending = new Map();
+let authGeneration = 0;
 let scanner = null,
   toastTimer = null,
   refreshing = false,
@@ -96,6 +97,7 @@ function notify(message, error = false) {
   }, 10000);
 }
 async function api(path, body, method = body === undefined ? "GET" : "POST") {
+  const requestGeneration = authGeneration;
   const sensitive = path === "login" || path === "password";
   const identity = sensitive ? null : method + path + JSON.stringify(body);
   let id;
@@ -130,11 +132,11 @@ async function api(path, body, method = body === undefined ? "GET" : "POST") {
     );
   }
   if (!response.ok) {
-    if (response.status === 401 && path !== "login") {
+    if (response.status === 401 && path !== "login" && requestGeneration === authGeneration) {
       loggedOut();
     }
     const e = new Error(
-      errors[data.error] ||
+      (path === "login" && response.status === 401 ? "ユーザー名またはパスワードが一致しません。" : errors[data.error]) ||
         "操作を完了できませんでした。入力内容や接続を確認してください。",
     );
     e.code = data.error;
@@ -147,7 +149,8 @@ function destroyScanner() {
   scanner?.destroy();
   scanner = null;
 }
-function loggedOut() {
+function loggedOut(username = "") {
+  authGeneration++;
   revision++;
   navigating = false;
   destroyScanner();
@@ -163,12 +166,12 @@ function loggedOut() {
   pending.clear();
   modal.close();
   document.querySelector("#modalContent").replaceChildren();
-  renderLogin();
+  renderLogin(username);
 }
 const brand =
   '<div class="brand"><img class="seal unityLogo" src="/assets/unity-logo.webp" alt="Unity" width="64" height="64"><div><strong>UNITY</strong><small>COMMUNITY OPERATIONS</small></div></div>';
-function renderLogin() {
-  root.innerHTML = `<main class="login"><section class="loginStory">${brand}<div><p class="eyebrow">UNITY QR / 2.0</p><h1>A quieter<br>welcome.</h1><p>出会いのはじまりを、心地よく。<br>Unityの時間をつなぐ、イベント受付。</p></div><footer>ONE COMMUNITY. MANY SHARED MOMENTS.</footer></section><section class="loginForm"><div><p class="eyebrow">OPERATIONS ACCESS</p><h2>運営ログイン</h2><form id="loginForm"><label>ユーザー名<input name="username" autocomplete="username" required maxlength="60"></label><label>パスワード<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label><p class="errorNote" id="loginError" role="alert"></p><button class="primary full" type="submit">ログイン</button></form><p class="loginNote muted">許可されたイベントの受付・参加者管理にアクセスします。<br>参加者向けの会員証・受付は<a href="../">こちら</a>。</p></div></section></main>`;
+function renderLogin(username = "") {
+  root.innerHTML = `<main class="login"><section class="loginStory">${brand}<div><p class="eyebrow">UNITY QR / 2.0</p><h1>A quieter<br>welcome.</h1><p>出会いのはじまりを、心地よく。<br>Unityの時間をつなぐ、イベント受付。</p></div><footer>ONE COMMUNITY. MANY SHARED MOMENTS.</footer></section><section class="loginForm"><div><p class="eyebrow">OPERATIONS ACCESS</p><h2>運営ログイン</h2><form id="loginForm"><label>ユーザー名<input name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(username)}" required maxlength="60"></label><label>パスワード<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label><p class="errorNote" id="loginError" role="alert"></p><button class="primary full" type="submit">ログイン</button></form><p class="loginNote muted">許可されたイベントの受付・参加者管理にアクセスします。<br>参加者向けの会員証・受付は<a href="../">こちら</a>。</p></div></section></main>`;
 }
 const views = [
   ["dashboard", "ダッシュボード", "▦"],
@@ -535,6 +538,7 @@ document.addEventListener("submit", async (e) => {
   try {
     if (form.id === "loginForm") {
       await api("login", values);
+      authGeneration++;
       state.actor = await api("session");
       await load();
       renderShell();
@@ -542,9 +546,9 @@ document.addEventListener("submit", async (e) => {
     if (form.id === "passwordForm") {
       const note = document.querySelector("#passwordError");
       if (note) note.textContent = "";
-      await api("password", values);
+      const result = await api("password", values);
       form.reset();
-      loggedOut();
+      loggedOut(result.username || state.actor?.username || "");
       notify("パスワードを変更しました。新しいパスワードでログインしてください。");
       return;
     }
@@ -707,7 +711,7 @@ document.addEventListener("click", async (e) => {
       dialog('登録イベントをまとめる',`<p>統合元：${esc(source.title)}</p><p class="hint">同じ開催日の統合先を選びます。受付・取消履歴がある場合は統合せず個別管理してください。</p>${targets.length?`<form id="eventMergeForm" data-event="${esc(source.id)}"><label>統合先<select name="targetId" aria-label="統合先" required><option value="">選択してください</option>${targets.map(e=>`<option value="${esc(e.id)}">${esc(e.title)} · ${e.total}名</option>`).join('')}</select></label><button class="primary full">統合内容を確認</button></form>`:'<p>同日の統合先イベントがありません。</p>'}`);
     }
     if (action === "changePassword") {
-      dialog("パスワードを変更", `<p class="hint">自分のアカウントのパスワードを変更します。変更後は、他の端末も含めて再ログインが必要です。</p><form id="passwordForm"><label>現在のパスワード<input name="currentPassword" type="password" autocomplete="current-password" required maxlength="128"></label><label>新しいパスワード<input name="newPassword" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></label><label>新しいパスワード（確認）<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></label><p class="hint">16〜128文字で設定してください。</p><p class="errorNote" id="passwordError" role="alert"></p><button class="primary full" type="submit">変更して再ログイン</button></form>`);
+      dialog("パスワードを変更", `<p class="hint">自分のアカウントのパスワードを変更します。変更後は、他の端末も含めて再ログインが必要です。</p><form id="passwordForm"><label>ユーザー名<input name="username" autocomplete="username" readonly value="${esc(state.actor?.username)}"></label><label>現在のパスワード<input name="currentPassword" type="password" autocomplete="current-password" required maxlength="128"></label><label>新しいパスワード<input name="newPassword" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></label><label>新しいパスワード（確認）<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></label><p class="hint">16〜128文字で設定してください。</p><p class="errorNote" id="passwordError" role="alert"></p><button class="primary full" type="submit">変更して再ログイン</button></form>`);
     }
     if (action === "logout") {
       await api("logout", {});
@@ -876,11 +880,12 @@ setInterval(async () => {
     Date.now() - lastRefresh < (state.actor.pollIntervalMs || 8000)
   )
     return;
+  const pollGeneration = authGeneration;
   refreshing = true;
   lastRefresh = Date.now();
   try {
     await load();
-    if (!state.actor || navigating) return;
+    if (pollGeneration !== authGeneration || !state.actor || navigating) return;
     if (state.view === "dashboard" || state.view === "history") renderView();
     else if (state.view === "participants") {
       document.querySelector("#people").innerHTML = peopleHTML();
@@ -896,7 +901,7 @@ setInterval(async () => {
         });
     }
   } catch (error) {
-    notify(error.message, true);
+    if (pollGeneration === authGeneration) notify(error.message, true);
   } finally {
     refreshing = false;
   }
