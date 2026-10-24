@@ -5,7 +5,7 @@ import {exportSnapshot} from './migration.js';
 // Optional, short-lived deployment credential for the Cloudflare account owner.
 // No user/password edits and no session/authentication bypass for normal routes.
 export function handleOperatorMaintenance(request:Request,db:ReceptionStore,token:string|undefined,expiresAt?:string,now=Date.now()):Response{
- const json=(value:unknown,status=200,extra:Record<string,string>={})=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',...extra}});
+ const json=(value:unknown,status=200,extra:Record<string,string>={})=>Response.json(value,{status,headers:{'X-QR-Maintenance-Version':'v1','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer',...extra}});
  const deadline=Number(expiresAt);
  if(!Number.isSafeInteger(deadline)||deadline<=now||deadline>now+900000)return json({error:'not_found'},404);
  if(!token||!/^[a-f0-9]{64}$/.test(token))return json({error:'not_found'},404);
