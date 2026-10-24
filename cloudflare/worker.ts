@@ -1,4 +1,5 @@
 import {resetLoginLimitOnce} from '../server/login-reset.js';
+import {deliverStudioRelay,nextStudioDelivery} from '../server/studio-relay.js';
 import type {
   DurableObjectState,
   DurableObjectNamespace,
@@ -24,6 +25,8 @@ export interface CloudEnv {
   QR_LOGIN_RESET_REVISION?: string;
   QR_ORIGIN?: string;
   QR_FORM_SECRET?: string;
+  STUDIO_RELAY_ENABLED?: string;
+  STUDIO_ALLOWED_GROUP_IDS?: string;
   LINE_CHANNEL_ID?: string;
   LINE_CHANNEL_SECRET?: string;
   LINE_CHANNEL_ACCESS_TOKEN?: string;
@@ -77,7 +80,9 @@ export class QRReception {
     private env: CloudEnv,
   ) {
     this.db = new ReceptionStore(new DurableSqlDriver(ctx.storage));
-    this.db.run("UPDATE line_webhooks SET status='failed',error_code='processing_interrupted' WHERE status='processing'");
+    this.db.run(
+      "UPDATE line_webhooks SET status='failed',error_code='processing_interrupted' WHERE status='processing'",
+    );
     this.db.sql.exec(
       "CREATE TABLE IF NOT EXISTS _qr_login_attempts(ip TEXT PRIMARY KEY,count INTEGER NOT NULL,expires INTEGER NOT NULL)",
     );
@@ -124,6 +129,8 @@ export class QRReception {
       root: "",
       formSecret: this.env.QR_FORM_SECRET,
       lineSchedule: (work) => this.ctx.waitUntil(work),
+      studioRelayEnabled: this.env.STUDIO_RELAY_ENABLED === "true",
+      studioAllowedGroupIds: this.env.STUDIO_ALLOWED_GROUP_IDS,
       lineChannelId: this.env.LINE_CHANNEL_ID,
       lineChannelSecret: this.env.LINE_CHANNEL_SECRET,
       lineAccessToken: this.env.LINE_CHANNEL_ACCESS_TOKEN,
@@ -158,13 +165,7 @@ export class QRReception {
         request,
         createHandler(this.db, cfg, this.attempts),
       );
-      if (
-        cfg.analyticsDeliveryUrl &&
-        cfg.analyticsToken &&
-        this.db.outbox().some((item) => item.status !== "sent") &&
-        (await this.ctx.storage.getAlarm()) === null
-      )
-        await this.ctx.storage.setAlarm(Date.now() + 60000);
+      await this.scheduleDelivery(cfg);
       return response;
     } catch (error) {
       return json(
@@ -175,20 +176,33 @@ export class QRReception {
       );
     }
   }
+  private async scheduleDelivery(cfg: AppConfig) {
+    const next = nextStudioDelivery(this.db, cfg);
+    const analytics =
+      cfg.analyticsDeliveryUrl && cfg.analyticsToken
+        ? this.db.row(
+            "SELECT MIN(next_attempt) next FROM outbox WHERE status!='sent'",
+          ).next
+        : null;
+    const candidates = [
+      next === null ? null : Math.max(Date.now() + 1000, Number(next)),
+      analytics === null
+        ? null
+        : Math.max(Date.now() + 60000, Number(analytics)),
+    ].filter((n): n is number => n !== null);
+    if (!candidates.length) return;
+    const at = Math.min(...candidates),
+      current = await this.ctx.storage.getAlarm();
+    if (current === null || current > at) await this.ctx.storage.setAlarm(at);
+  }
   async alarm() {
-    if (!this.env.ANALYTICS_CHECKIN_URL || !this.env.ANALYTICS_API_TOKEN)
-      return;
-    await deliverOutbox(this.db, {
-      analyticsDeliveryUrl: this.env.ANALYTICS_CHECKIN_URL,
-      analyticsToken: this.env.ANALYTICS_API_TOKEN,
-    });
-    const next = this.db.row(
-      "SELECT MIN(next_attempt) next FROM outbox WHERE status!='sent'",
-    ).next;
-    if (next !== null)
-      await this.ctx.storage.setAlarm(
-        Math.max(Date.now() + 60000, Number(next)),
-      );
+    const cfg = this.config(this.env.QR_ORIGIN || "https://qr.invalid");
+    // Both queues run independently; Studio outages never suppress Analytics delivery.
+    await Promise.allSettled([
+      deliverOutbox(this.db, cfg),
+      deliverStudioRelay(this.db, cfg),
+    ]);
+    await this.scheduleDelivery(cfg);
   }
 }
 

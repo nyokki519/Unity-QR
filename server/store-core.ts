@@ -28,6 +28,10 @@ export class ReceptionStore {
       CREATE TABLE IF NOT EXISTS attendance(event_id TEXT REFERENCES events(id),participant_id TEXT REFERENCES participants(id),state TEXT NOT NULL CHECK(state IN ('in','undone')),checked_in_at TEXT NOT NULL,source TEXT NOT NULL,PRIMARY KEY(event_id,participant_id));
       CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT,participant_id TEXT,actor_id TEXT NOT NULL,action TEXT NOT NULL,reason TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS idempotency(actor_id TEXT NOT NULL,key TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL,PRIMARY KEY(actor_id,key));
+      CREATE TABLE IF NOT EXISTS studio_relay_groups(group_hash TEXT PRIMARY KEY);
+      CREATE TABLE IF NOT EXISTS studio_relay_outbox(id TEXT PRIMARY KEY,kind TEXT NOT NULL,group_hash TEXT NOT NULL,message_id TEXT NOT NULL,payload TEXT,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL,lease_token TEXT,lease_until INTEGER NOT NULL DEFAULT 0,created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,retain_until INTEGER NOT NULL,last_error TEXT);
+      CREATE INDEX IF NOT EXISTS studio_relay_due ON studio_relay_outbox(status,next_attempt,lease_until);
+      CREATE INDEX IF NOT EXISTS studio_relay_source ON studio_relay_outbox(group_hash,message_id,kind);
       CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,user_id TEXT REFERENCES users(id),expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS outbox(id TEXT PRIMARY KEY,event_id TEXT NOT NULL,payload TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_attempt INTEGER NOT NULL DEFAULT 0,last_error TEXT,created_at TEXT NOT NULL,sequence INTEGER NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS sync_runs(id INTEGER PRIMARY KEY AUTOINCREMENT,kind TEXT NOT NULL,status TEXT NOT NULL,detail TEXT NOT NULL,created_at TEXT NOT NULL);
