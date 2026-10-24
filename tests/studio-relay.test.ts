@@ -489,6 +489,28 @@ test("full retained queue rejects new media without losing duplicate acknowledge
     db.close();
   }
 });
+test("retained capacity reserves a source cancellation slot and coalesces repeated unsends",async()=>{
+ const db=new Store(':memory:');try{
+  await admit(db,[event()]);
+  for(let n=0;n<998;n++)await admit(db,[{...event('other-cancel-'+n),type:'unsend',unsend:{messageId:String(1000+n)}}]);
+  await assert.rejects(admit(db,[{...event('must-keep-reservation'),type:'unsend',unsend:{messageId:'99999'}}]),/studio_relay_capacity/);
+  await admit(db,[{...event('source-cancel'),type:'unsend',unsend:{messageId:'123'}}]);
+  assert.equal(db.row("SELECT status FROM studio_relay_outbox WHERE kind='media'").status,'cancelled');
+  assert.equal(db.row('SELECT count(*) n FROM studio_relay_outbox').n,1000);
+  await admit(db,[{...event('same-source-other-webhook'),type:'unsend',unsend:{messageId:'123'}}]);
+  assert.equal(db.row('SELECT count(*) n FROM studio_relay_outbox').n,1000);
+  let first='';await (await relay()).deliverStudioRelay(db,cfg,async(_url,init)=>{first||=JSON.parse(String(init!.body)).events[0].type;return Response.json({ok:true});});assert.equal(first,'unsend');
+ }finally{db.close();}
+});
+test("a full mixed batch persists source cancellation even when new media needs redelivery",async()=>{
+ const db=new Store(':memory:');try{
+  await admit(db,[event()]);for(let n=0;n<998;n++)await admit(db,[{...event('filler-'+n),type:'unsend',unsend:{messageId:String(1000+n)}}]);
+  await assert.rejects(admit(db,[event('blocked-new-media','image','777'),{...event('priority-cancel'),type:'unsend',unsend:{messageId:'123'}}]),/studio_relay_capacity/);
+  assert.equal(db.row("SELECT status FROM studio_relay_outbox WHERE kind='media' AND message_id='123'").status,'cancelled');
+  assert.equal(db.row("SELECT count(*) n FROM studio_relay_outbox WHERE kind='unsend' AND message_id='123'").n,1);
+  assert.equal(db.row("SELECT count(*) n FROM studio_relay_outbox WHERE kind='media' AND message_id='777'").n,0);
+ }finally{db.close();}
+});
 test("exhausted deliveries clear retained payload without a thirteenth network attempt", async () => {
   const db = new Store(":memory:");
   try {

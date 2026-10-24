@@ -87,40 +87,37 @@ export function enqueueStudioEvents(
       payload: JSON.stringify({ events: [event] }),
     };
   });
-  db.sql.transaction(() => {
+  const commit=(batch:typeof rows)=>db.sql.transaction(() => {
     db.run("DELETE FROM studio_relay_outbox WHERE retain_until<=?", now);
-    for (const row of rows) {
+    for (const row of batch) {
       if (db.row("SELECT id FROM studio_relay_outbox WHERE id=?", row.id))
         continue;
-      // A later redelivery cannot resurrect a revoked source even with a different webhook ID.
-      if (
-        row.kind === "media" &&
-        db.row(
-          "SELECT id FROM studio_relay_outbox WHERE kind='unsend' AND group_hash=? AND message_id=?",
-          row.groupHash,
-          row.message,
-        )
-      )
-        continue;
-      if (
-        db.row("SELECT COUNT(*) n FROM studio_relay_outbox").n >= 1000 ||
-        (row.kind === "media" &&
-          db.row(
-            "SELECT COUNT(*) n FROM studio_relay_outbox WHERE kind='media' AND created_at>=?",
-            Math.floor(now / day) * day,
-          ).n >= 100)
-      )
-        fail("studio_relay_capacity", 503);
+      const cancellation = db.row(
+        "SELECT id FROM studio_relay_outbox WHERE kind='unsend' AND group_hash=? AND message_id=?",
+        row.groupHash,row.message,
+      );
+      // Different webhook IDs for the same cancellation share one durable slot.
+      if(row.kind==='media'&&cancellation)continue;
+      if(row.kind==='unsend'){
+        db.run("UPDATE studio_relay_outbox SET status='cancelled',payload=NULL,lease_token=NULL,lease_until=0 WHERE kind='media' AND group_hash=? AND message_id=? AND status IN ('pending','sending')",row.groupHash,row.message);
+        if(cancellation)continue;
+      }
+      const knownMedia=Boolean(db.row("SELECT id FROM studio_relay_outbox WHERE kind='media' AND group_hash=? AND message_id=?",row.groupHash,row.message));
+      const retained=db.row("SELECT COUNT(*) n FROM studio_relay_outbox").n;
+      const reserved=db.row(`SELECT COUNT(*) n FROM (
+        SELECT m.group_hash,m.message_id FROM studio_relay_outbox m WHERE m.kind='media'
+        AND NOT EXISTS(SELECT 1 FROM studio_relay_outbox u WHERE u.kind='unsend' AND u.group_hash=m.group_hash AND u.message_id=m.message_id)
+        GROUP BY m.group_hash,m.message_id)`).n;
+      // Every admitted source reserves a future cancellation row. Unrelated
+      // unsends cannot consume that reservation, and source unsends release it.
+      const reserveDelta=row.kind==='media'?(knownMedia?0:1):(knownMedia?-1:0);
+      if(retained+reserved+1+reserveDelta>1000 ||
+        row.kind==='media'&&db.row("SELECT COUNT(*) n FROM studio_relay_outbox WHERE kind='media' AND created_at>=?",Math.floor(now/day)*day).n>=100)
+        fail("studio_relay_capacity",503);
       if (row.kind === "media")
         db.run(
           "INSERT OR IGNORE INTO studio_relay_groups(group_hash) VALUES(?)",
           row.groupHash,
-        );
-      if (row.kind === "unsend")
-        db.run(
-          "UPDATE studio_relay_outbox SET status='cancelled',payload=NULL,lease_token=NULL,lease_until=0 WHERE kind='media' AND group_hash=? AND message_id=? AND status IN ('pending','sending')",
-          row.groupHash,
-          row.message,
         );
       db.run(
         "INSERT INTO studio_relay_outbox(id,kind,group_hash,message_id,payload,status,created_at,expires_at,retain_until,next_attempt) VALUES(?,?,?,?,?,'pending',?,?,?,?)",
@@ -136,6 +133,14 @@ export function enqueueStudioEvents(
       );
     }
   });
+  // Revocations survive another event's capacity failure. LINE may redeliver
+  // the batch, but an accepted source must not keep forwarding while waiting.
+  let cancellationFailure:unknown;
+  for(const row of rows.filter(r=>r.kind==='unsend')){
+    try{commit([row]);}catch(error){cancellationFailure??=error;}
+  }
+  if(cancellationFailure)throw cancellationFailure;
+  commit(rows.filter(r=>r.kind==='media'));
 }
 export function nextStudioDelivery(
   db: ReceptionStore,

@@ -20,6 +20,15 @@ async function eventually(check) {
   }
   assert.ok(check(), "expected bounded alarm delivery");
 }
+function persistedRelay(dir,check){
+ for(const p of files(dir).filter(p=>p.endsWith('.sqlite'))){
+  const db=new DatabaseSync(p,{readOnly:true});
+  try{if(db.prepare("SELECT name FROM sqlite_master WHERE name='studio_relay_outbox'").get()){
+   const row=db.prepare('SELECT status,payload FROM studio_relay_outbox').get();if(row&&check(row))return true;
+  }}finally{db.close();}
+ }
+ return false;
+}
 test("workerd persists relay on failure, survives restart and signs only minimal media without LINE sends", async () => {
   const dir = mkdtempSync(join(tmpdir(), "qr-studio-"));
   let mf,
@@ -90,7 +99,7 @@ test("workerd persists relay on failure, survives restart and signs only minimal
         body,
       });
     assert.equal((await request()).status, 200);
-    await eventually(() => calls === 1);
+    await eventually(() => calls === 1&&persistedRelay(dir,row=>row.status==='pending'));
     await mf.dispose();
     mf = undefined;
     let found = false;
@@ -119,7 +128,7 @@ test("workerd persists relay on failure, survives restart and signs only minimal
     fail = false;
     mf = start();
     assert.equal((await request()).status, 200);
-    await eventually(() => calls === 2);
+    await eventually(() => calls === 2&&persistedRelay(dir,row=>row.status==='sent'&&row.payload===null));
     for (const item of received) {
       assert.equal(
         item.url,
