@@ -1,4 +1,4 @@
-import {handleOperatorMaintenance} from '../server/operator-maintenance.js';
+import {handleReadOnlyOperatorMaintenance} from '../server/operator-maintenance.js';
 import {resetLoginLimitOnce} from '../server/login-reset.js';
 import type {
   DurableObjectState,
@@ -73,13 +73,16 @@ async function migrationBody(request: Request) {
 }
 
 export class QRReception {
-  private db: ReceptionStore;
-  private attempts: LoginAttempts;
+  private db!: ReceptionStore;
+  private attempts!: LoginAttempts;
+  private initialized = false;
   constructor(
     private ctx: DurableObjectState,
     private env: CloudEnv,
-  ) {
-    this.db = new ReceptionStore(new DurableSqlDriver(ctx.storage));
+  ) {}
+  private initialize() {
+    if(this.initialized)return;
+    this.db = new ReceptionStore(new DurableSqlDriver(this.ctx.storage));
     this.db.run("UPDATE line_webhooks SET status='failed',error_code='processing_interrupted' WHERE status='processing'");
     this.db.sql.exec(
       "CREATE TABLE IF NOT EXISTS _qr_login_attempts(ip TEXT PRIMARY KEY,count INTEGER NOT NULL,expires INTEGER NOT NULL)",
@@ -109,6 +112,7 @@ export class QRReception {
         this.db.run("DELETE FROM _qr_login_attempts WHERE expires<=?", time);
       },
     };
+    this.initialized = true;
   }
   private config(origin: string): AppConfig {
     const url = new URL(this.env.QR_ORIGIN || origin);
@@ -142,9 +146,10 @@ export class QRReception {
   }
   async fetch(request: Request) {
     try {
-      const url = new URL(request.url),
-        cfg = this.config(url.origin);
-      if(url.pathname.startsWith("/api/v2/maintenance/"))return handleOperatorMaintenance(request,this.db,this.env.QR_MAINTENANCE_TOKEN,this.env.QR_MAINTENANCE_EXPIRES_AT);
+      const url = new URL(request.url);
+      if(url.pathname.startsWith("/api/v2/maintenance/"))return handleReadOnlyOperatorMaintenance(request,this.ctx.storage.sql,this.env.QR_MAINTENANCE_TOKEN,this.env.QR_MAINTENANCE_EXPIRES_AT);
+      this.initialize();
+      const cfg = this.config(url.origin);
       if (url.pathname === "/api/v2/setup" && request.method === "POST") {
         const provided = request.headers.get("authorization") || "";
         if (
@@ -180,6 +185,7 @@ export class QRReception {
     }
   }
   async alarm() {
+    this.initialize();
     if (!this.env.ANALYTICS_CHECKIN_URL || !this.env.ANALYTICS_API_TOKEN)
       return;
     await deliverOutbox(this.db, {

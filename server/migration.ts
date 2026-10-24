@@ -87,18 +87,18 @@ export type OwnedSnapshot = {
   schemaVersion: 2 | 3 | 4;
   tables: Record<string, Record<string, any>[]>;
 };
-export function exportSnapshot(db: ReceptionStore): OwnedSnapshot {
-  return db.sql.transaction(() => ({
+export function exportSnapshotReadOnly(readRows:(query:string)=>Record<string,any>[]):OwnedSnapshot {
+  return {
     application: "unity-qr",
     version: 1,
     schemaVersion: 4,
     tables: Object.fromEntries(
-      Object.keys(columns).map((name) => [
-        name,
-        db.rows(`SELECT * FROM ${name} ORDER BY rowid`),
-      ]),
+      Object.keys(columns).map(name=>[name,readRows(`SELECT * FROM ${name} ORDER BY rowid`)]),
     ),
-  }));
+  };
+}
+export function exportSnapshot(db: ReceptionStore): OwnedSnapshot {
+  return db.sql.transaction(()=>exportSnapshotReadOnly(query=>db.rows(query)));
 }
 const nullable = new Set(["event_id", "participant_id"]);
 const nullableColumns: Record<string, string[]> = {
