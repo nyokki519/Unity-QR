@@ -1,3 +1,4 @@
+import {handleOperatorPasswordReset} from '../server/operator-password-reset.js';
 import {handleReadOnlyOperatorMaintenance} from '../server/operator-maintenance.js';
 import {resetLoginLimitOnce} from '../server/login-reset.js';
 import type {
@@ -23,6 +24,7 @@ export interface CloudEnv {
   QR_SIGNING_KEY?: string;
   QR_SETUP_TOKEN?: string;
   QR_LOGIN_RESET_REVISION?: string;
+  QR_OPERATOR_RESET_PLAN?: string;
   QR_MAINTENANCE_TOKEN?: string;
   QR_MAINTENANCE_EXPIRES_AT?: string;
   QR_ORIGIN?: string;
@@ -147,6 +149,7 @@ export class QRReception {
   async fetch(request: Request) {
     try {
       const url = new URL(request.url);
+      if(url.pathname==="/api/v2/maintenance/reset-operator")return handleOperatorPasswordReset(request,this.ctx.storage,this.env.QR_MAINTENANCE_TOKEN,this.env.QR_MAINTENANCE_EXPIRES_AT,this.env.QR_OPERATOR_RESET_PLAN);
       if(url.pathname.startsWith("/api/v2/maintenance/"))return handleReadOnlyOperatorMaintenance(request,this.ctx.storage.sql,this.env.QR_MAINTENANCE_TOKEN,this.env.QR_MAINTENANCE_EXPIRES_AT);
       this.initialize();
       const cfg = this.config(url.origin);
