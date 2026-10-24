@@ -1,0 +1,14 @@
+node_modules/
+test-results/
+dist/
+ops/decoder.js
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+.env.*
+!.env.example
+.wrangler/
+.dev.vars
+.dev.vars.*
