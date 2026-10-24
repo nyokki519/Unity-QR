@@ -405,6 +405,20 @@ test("runtime restart preserves receipts, sessions and failed-login throttling",
   );
   adminCookie = await login();
 });
+test("workerd self-service password change revokes own sessions and preserves Viewer sessions", async () => {
+  const oldPassword = password, nextPassword = "test-next-cloud-password-456";
+  const viewerCookie = await login("viewer"), ownCookie = await login();
+  const response = await call("/api/v2/password", "POST", {currentPassword:oldPassword,newPassword:nextPassword,confirmPassword:nextPassword}, ownCookie);
+  assert.equal(response.status,200);
+  assert.equal((await call("/api/v2/session","GET",undefined,ownCookie)).status,401);
+  assert.equal((await call("/api/v2/session","GET",undefined,viewerCookie)).status,200);
+  password=nextPassword;
+  adminCookie=await login();
+  assert.equal((await call("/api/v2/session","GET",undefined,adminCookie)).status,200);
+  assert.equal((await call("/api/v2/login","POST",{username:"operator",password:oldPassword})).status,401);
+  for(let n=0;n<10;n++)assert.equal((await call("/api/v2/password","POST",{currentPassword:"wrong",newPassword:nextPassword,confirmPassword:nextPassword},adminCookie,{"CF-Connecting-IP":"203.0.113.1"})).status,403);
+  assert.equal((await call("/api/v2/password","POST",{currentPassword:nextPassword,newPassword:nextPassword,confirmPassword:nextPassword},adminCookie,{"CF-Connecting-IP":"203.0.113.2"})).status,429);
+});
 test("a missing cloud database owner marker is rejected without claiming or changing existing data", async () => {
   await mf.dispose();
   mf = undefined;

@@ -1,6 +1,6 @@
 import {eventLifecycle,canonicalEvent,archiveEvent,previewEventMerge,mergeEvent} from "./event-organizing.js";
 import { randomUUID, randomBytes } from "node:crypto";
-import { checkPassword, digest, fail, text } from "./security.js";
+import { checkPassword, hashPassword, digest, fail, text } from "./security.js";
 import type { SqlDriver } from "./storage.js";
 export type Actor = {
   id: string;
@@ -629,6 +629,18 @@ export class ReceptionStore {
       Date.now() + 8 * 3600_000,
     );
     return token;
+  }
+  changeOwnPassword(actor: Actor, currentPassword: string, newPassword: string) {
+    const user = this.row("SELECT * FROM users WHERE id=? AND enabled=1", actor.id);
+    if (!user || !checkPassword(currentPassword, user.password_hash))
+      fail("current_password_invalid", 403);
+    const nextHash = hashPassword(newPassword);
+    this.sql.transaction(() => {
+      const updated = this.run("UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND enabled=1", nextHash, actor.id, user.password_hash);
+      if (Number(updated.changes) !== 1) fail("current_password_invalid", 403);
+      this.run("DELETE FROM sessions WHERE user_id=?", actor.id);
+      this.audit(actor, "password_change", null, null);
+    });
   }
   session(token: string): Actor | null {
     if (!token || token.length > 128) return null;

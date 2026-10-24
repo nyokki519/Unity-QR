@@ -207,13 +207,31 @@ export function createHandler(
           return json(res, {
             role: actor.role,
             events: actor.events,
-            features: {sheetReception:1,similarEventAliases:1,eventOrganization:1},
+            features: {sheetReception:1,similarEventAliases:1,eventOrganization:1,selfPasswordChange:1},
             ...(cfg.pollIntervalMs
               ? { pollIntervalMs: cfg.pollIntervalMs }
               : {}),
           });
         if (path.pathname === "/api/v2/logout" && method === "POST") {
           db.logout(token);
+          setCookie("", 0);
+          return json(res, { ok: true });
+        }
+        if (path.pathname === "/api/v2/password" && method === "POST") {
+          const input = await body(req);
+          if (typeof input.currentPassword !== "string" || typeof input.newPassword !== "string" || typeof input.confirmPassword !== "string") fail("invalid_request");
+          if (input.newPassword !== input.confirmPassword) fail("password_confirmation_mismatch");
+          const attemptKey = "password-change:" + actor.id, time = Date.now();
+          attempts.clearExpired(time);
+          const current = attempts.get(attemptKey) || { count: 0, expires: time + 15 * 60000 };
+          if (current.count >= 10) {
+            res.setHeader("Retry-After", "900");
+            fail("too_many_password_attempts", 429);
+          }
+          current.count++;
+          attempts.set(attemptKey, current);
+          db.changeOwnPassword(actor, input.currentPassword, input.newPassword);
+          attempts.delete(attemptKey);
           setCookie("", 0);
           return json(res, { ok: true });
         }

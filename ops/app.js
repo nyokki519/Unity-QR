@@ -16,6 +16,10 @@ const state = {
   status: "all",
   sort: "name",
 };
+modal.addEventListener("close", () => {
+  if (!modal.open && document.querySelector("#passwordForm"))
+    document.querySelector("#modalContent").replaceChildren();
+});
 const pending = new Map();
 let scanner = null,
   toastTimer = null,
@@ -76,6 +80,9 @@ const errors = {
   invalid_event: "開催日時・受付時間・定員を確認してください。",
   reason_required: "変更理由を入力してください。",
   password_length: "パスワードは16〜128文字にしてください。",
+  current_password_invalid: "現在のパスワードが一致しません。",
+  password_confirmation_mismatch: "新しいパスワードと確認用の入力が一致しません。",
+  too_many_password_attempts: "変更の試行が多いため、15分後に再試行してください。",
   idempotency_conflict: "別の操作としてやり直してください。",
   undo_required: "先に受付を取り消してください。",
 };
@@ -89,9 +96,10 @@ function notify(message, error = false) {
   }, 10000);
 }
 async function api(path, body, method = body === undefined ? "GET" : "POST") {
-  const identity = method + path + JSON.stringify(body);
+  const sensitive = path === "login" || path === "password";
+  const identity = sensitive ? null : method + path + JSON.stringify(body);
   let id;
-  if (method !== "GET") {
+  if (method !== "GET" && !sensitive) {
     id = pending.get(identity) || crypto.randomUUID();
     pending.set(identity, id);
   }
@@ -180,7 +188,7 @@ function renderShell() {
     )
     .join(
       "",
-    )}</nav><div class="sidebarFoot">Quietly connected.<br>UNITY COMMUNITY / QR 2.0</div></aside><div class="workspace"><header class="topbar"><p class="eyebrow">COMMUNITY OPERATIONS</p><label class="eventSelect" for="eventSelect">イベント<select id="eventSelect">${state.events.length ? state.events.map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? "selected" : ""}>${esc(e.title)}</option>`).join("") : '<option value="">イベントなし</option>'}</select></label><button class="textButton" data-action="logout">ログアウト</button></header><main class="main" id="main"></main></div></div>`;
+    )}</nav><div class="sidebarFoot">Quietly connected.<br>UNITY COMMUNITY / QR 2.0</div></aside><div class="workspace"><header class="topbar"><p class="eyebrow">COMMUNITY OPERATIONS</p><label class="eventSelect" for="eventSelect">イベント<select id="eventSelect">${state.events.length ? state.events.map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? "selected" : ""}>${esc(e.title)}</option>`).join("") : '<option value="">イベントなし</option>'}</select></label><div class="accountActions">${state.actor?.features?.selfPasswordChange ? '<button class="textButton" data-action="changePassword" aria-label="パスワードを変更">パスワード</button>' : ''}<button class="textButton" data-action="logout">ログアウト</button></div></header><main class="main" id="main"></main></div></div>`;
   renderView();
 }
 function pageHead(title, description, action = "") {
@@ -531,6 +539,15 @@ document.addEventListener("submit", async (e) => {
       await load();
       renderShell();
     }
+    if (form.id === "passwordForm") {
+      const note = document.querySelector("#passwordError");
+      if (note) note.textContent = "";
+      await api("password", values);
+      form.reset();
+      loggedOut();
+      notify("パスワードを変更しました。新しいパスワードでログインしてください。");
+      return;
+    }
     if (form.id === "walkinForm") {
       await api("participants", { eventId: form.dataset.event, ...values });
       await afterMutation("参加者を登録しました。");
@@ -653,6 +670,8 @@ document.addEventListener("submit", async (e) => {
   } catch (error) {
     if (form.id === "loginForm") {
       document.querySelector("#loginError").textContent = error.message;
+    } else if (form.id === "passwordForm" && document.querySelector("#passwordError")) {
+      document.querySelector("#passwordError").textContent = error.message;
     } else notify(error.message, true);
   } finally {
     if (button) button.disabled = false;
@@ -686,6 +705,9 @@ document.addEventListener("click", async (e) => {
       const day=value=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date(value));
       const targets=state.events.filter(e=>e.id!==source.id&&day(e.startsAt)===day(source.startsAt));
       dialog('登録イベントをまとめる',`<p>統合元：${esc(source.title)}</p><p class="hint">同じ開催日の統合先を選びます。受付・取消履歴がある場合は統合せず個別管理してください。</p>${targets.length?`<form id="eventMergeForm" data-event="${esc(source.id)}"><label>統合先<select name="targetId" aria-label="統合先" required><option value="">選択してください</option>${targets.map(e=>`<option value="${esc(e.id)}">${esc(e.title)} · ${e.total}名</option>`).join('')}</select></label><button class="primary full">統合内容を確認</button></form>`:'<p>同日の統合先イベントがありません。</p>'}`);
+    }
+    if (action === "changePassword") {
+      dialog("パスワードを変更", `<p class="hint">自分のアカウントのパスワードを変更します。変更後は、他の端末も含めて再ログインが必要です。</p><form id="passwordForm"><label>現在のパスワード<input name="currentPassword" type="password" autocomplete="current-password" required maxlength="128"></label><label>新しいパスワード<input name="newPassword" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></label><label>新しいパスワード（確認）<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="16" maxlength="128"></label><p class="hint">16〜128文字で設定してください。</p><p class="errorNote" id="passwordError" role="alert"></p><button class="primary full" type="submit">変更して再ログイン</button></form>`);
     }
     if (action === "logout") {
       await api("logout", {});

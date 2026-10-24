@@ -306,6 +306,12 @@ small {
   border-bottom: 1px solid var(--line);
   gap: 20px;
 }
+.accountActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .topbar .eyebrow {
   margin: 0;
   white-space: nowrap;
