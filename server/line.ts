@@ -5,7 +5,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import QRCode from "qrcode";
-import { FormClaims } from "./form-claims.js";
+import { FormClaims, ClaimSelectionRequired } from "./form-claims.js";
 import type { Actor, ReceptionStore } from "./store-core.js";
 import {
   ApiError,
@@ -160,22 +160,26 @@ export class LineService {
       {
         type: "text",
         text:
-          action === "cancel"
+          (action === "cancel"
             ? "キャンセルするイベントを選んでください。"
-            : "イベントを選んでください。",
+            : "イベントを選んでください。")+'\n'+events.map((e,i)=>`${i+1}. ${this.eventLabel(e)}`).join('\n'),
         quickReply: {
-          items: events.slice(0, 13).map((e) => ({
+          items: events.slice(0, 13).map((e,i) => ({
             type: "action",
             action: {
               type: "postback",
-              label: String(e.title).slice(0, 20),
+              label: `${i+1}. ${this.eventLabel(e)}`.slice(0, 20),
               data: action + ":" + e.id,
-              displayText: String(e.title).slice(0, 100),
+              displayText: this.eventLabel(e).slice(0, 100),
             },
           })),
         },
       },
     ];
+  }
+  private eventLabel(event:any) {
+    const date=new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(event.startsAt||event.starts_at));
+    return `${date} ${event.title}`;
   }
   respond(e: any, profileName?: string): Message[] {
     const user = this.user(e);
@@ -189,9 +193,11 @@ export class LineService {
     if (typeof input !== "string" || input.length > 500) return [];
     const command = input.trim();
     const submission = /^(?:参加QR|参加希望)\s+([a-f0-9]{64})$/.exec(command);
-    if (e.type === "message" && submission) {
+    const decision=e.type==='postback'?/^claim_(reuse|new):([a-f0-9]{64})(?::([\w-]{1,128}))?$/.exec(command):null;
+    if ((e.type === "message" && submission) || decision) {
       try {
-        const accepted = new FormClaims(this.db).redeem(submission[1], subject);
+        const forms=new FormClaims(this.db);
+        const accepted = submission?forms.redeem(submission[1], subject):forms.redeemReserved(decision![2],subject,decision![1]==='new'?'new':decision![3]||'invalid');
         const token = randomBytes(32).toString("hex");
         this.db.run(
           "INSERT INTO line_tickets VALUES(?,?,?,?)",
@@ -212,7 +218,13 @@ export class LineService {
             "\nこのリンクは本人用です。他の方に転送しないでください。",
         );
       } catch (error) {
+        if(error instanceof ClaimSelectionRequired){
+          const c=error.choice;
+          if(c.people.length>12)return reply('このイベントの申込が多数あります。再申込せず運営へお問い合わせください。');
+          return [{type:'text',text:`${this.eventLabel(c)}\n申込名：${c.name}\nこのLINEには既存の申込があります。再申込なら既存の参加者を選択してください。同行者は「別の参加者として登録」を選んでください。`,quickReply:{items:[...c.people.map((p:any,i:number)=>({type:'action',action:{type:'postback',label:`${i+1}. ${p.name}`.slice(0,20),displayText:`既存申込：${p.name}`.slice(0,100),data:`claim_reuse:${c.claimHash}:${p.id}`}})),{type:'action',action:{type:'postback',label:'別の参加者として登録',data:`claim_new:${c.claimHash}`,displayText:'別の参加者として登録'}}]}}];
+        }
         const messages: Record<string, string> = {
+          claim_selection_invalid:'選択した申込を確認できません。同じ申込コードからやり直してください。',
           event_archived: "このイベントは中止・削除されているためQRを発行できません。運営へお問い合わせください。",
           claim_pending:
             "Googleでの申込受理をまだ確認できません。少し待って同じ申込メッセージを送ってください。",
@@ -243,9 +255,10 @@ export class LineService {
           ? "ticket"
           : "register";
     let selected: string | undefined;
+    let selectedPerson:string|undefined;
     if (e.type === "postback") {
       const match =
-        /^(register|ticket|cancel|confirm_cancel):([\w-]{1,128})$/.exec(
+        /^(register|ticket|cancel|confirm_cancel):([\w-]{1,128})(?::([\w-]{1,128}))?$/.exec(
           command,
         );
       if (!match)
@@ -254,6 +267,8 @@ export class LineService {
         );
       action = match[1];
       selected = match[2];
+      selectedPerson=match[3];
+      if(action==='register'&&selectedPerson)return reply('選択を確認できません。「参加希望」からやり直してください。');
     }
     const pending = this.db.row(
       "SELECT event_id,expires_at FROM line_conversations WHERE subject_hash=?",
@@ -318,8 +333,15 @@ export class LineService {
     if(action!=='register') {
       const ids=new Set(owned.filter(row=>row.id===ev.id).map(row=>row.ownedParticipant));
       if(identity&&this.db.row('SELECT 1 FROM registrations WHERE event_id=? AND participant_id=?',ev.id,identity.participant_id))ids.add(identity.participant_id);
-      if(ids.size!==1)return reply('このイベントの参加登録が複数あります。運営へお問い合わせください。');
-      identity={participant_id:[...ids][0]};
+      for(const id of ids)if(this.db.row('SELECT status FROM registrations WHERE event_id=? AND participant_id=?',ev.id,id)?.status!=='planned')ids.delete(id);
+      if(selectedPerson&&!ids.has(selectedPerson))return reply('この参加登録を操作する権限がありません。');
+      if(!ids.size)return reply('対象の参加登録はキャンセル済みか、見つかりません。');
+      if(ids.size>1&&!selectedPerson){
+        if(ids.size>13)return reply('参加登録が多数あります。運営へお問い合わせください。');
+        const people=[...ids].map(id=>this.db.row('SELECT id,name FROM participants WHERE id=?',id));
+        return [{type:'text',text:`${this.eventLabel(ev)}\n対象の参加者を選んでください。\n`+people.map((p:any,i:number)=>`${i+1}. ${p.name}（${p.id.slice(-6)}）`).join('\n'),quickReply:{items:people.map((p:any,i:number)=>({type:'action',action:{type:'postback',label:`${i+1}. ${p.name}`.slice(0,20),data:`${action==='confirm_cancel'?'cancel':action}:${ev.id}:${p.id}`,displayText:`${i+1}. ${p.name}`.slice(0,100)}}))}}];
+      }
+      identity={participant_id:selectedPerson||[...ids][0]};
     }
     if (action === "cancel") {
       if (
@@ -335,7 +357,7 @@ export class LineService {
       return [
         {
           type: "text",
-          text: ev.title + " の参加をキャンセルしますか？",
+          text: this.eventLabel(ev) + '\n参加者：'+this.db.row('SELECT name FROM participants WHERE id=?',identity.participant_id).name+"\nこの参加をキャンセルしますか？",
           quickReply: {
             items: [
               {
@@ -343,8 +365,8 @@ export class LineService {
                 action: {
                   type: "postback",
                   label: "キャンセルを確定",
-                  data: "confirm_cancel:" + ev.id,
-                  displayText: ev.title + " のキャンセルを確定",
+                  data: "confirm_cancel:" + ev.id+':'+identity.participant_id,
+                  displayText: this.eventLabel(ev).slice(0,85) + " のキャンセルを確定",
                 },
               },
             ],
@@ -369,7 +391,7 @@ export class LineService {
           identity.participant_id,
         );
         this.db.audit(system, "line_cancel", ev.id, identity.participant_id);
-        return reply(ev.title + " の参加をキャンセルしました。");
+        return reply(this.eventLabel(ev) + " の参加をキャンセルしました。");
       });
     }
     if (action === "register") {

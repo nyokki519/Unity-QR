@@ -28,6 +28,7 @@ import {
 
 import { FormClaims, verifyFormAuth } from "./form-claims.js";
 import { LineService, type LineConfig } from "./line.js";
+import {cancellationSnapshot} from './cancellations.js';
 import {
   fetchAnalyticsOperatorEvents,
   importAnalyticsOperatorEvents,
@@ -162,7 +163,7 @@ export function createHandler(
         return json(res, await line.publicTicket(auth.slice(7)));
       }
       if (path.pathname === "/api/v2/health")
-        return json(res, { service: "unity-qr", version: 2 });
+        return json(res, { service: "unity-qr", version: 2,features:{cancellationSnapshot:1} });
       if (path.pathname.startsWith("/api/")) {
         if (!path.pathname.startsWith("/api/v2/")) fail("not_found", 404);
         if (method !== "GET" && req.headers.origin !== cfg.origin)
@@ -207,7 +208,7 @@ export function createHandler(
           return json(res, {
             role: actor.role,
             events: actor.events,
-            features: {sheetReception:1,similarEventAliases:1,eventOrganization:1},
+            features: {sheetReception:1,similarEventAliases:1,eventOrganization:1,cancellationSnapshot:1},
             ...(cfg.pollIntervalMs
               ? { pollIntervalMs: cfg.pollIntervalMs }
               : {}),
@@ -217,6 +218,7 @@ export function createHandler(
           setCookie("", 0);
           return json(res, { ok: true });
         }
+        if(path.pathname==='/api/v2/cancellations'&&method==='GET')return json(res,cancellationSnapshot(db,actor));
         if (path.pathname === "/api/v2/events") {
           if (method === "GET") {const includeArchived=path.searchParams.get("includeArchived")==="1";if(includeArchived)db.admin(actor);return json(res, { events: db.events(actor,includeArchived) });}
           if (method === "POST")

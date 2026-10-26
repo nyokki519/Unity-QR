@@ -19,6 +19,15 @@ const input = {
   opensAt: new Date(Date.now() - 60000).toISOString(),
   closesAt: new Date(Date.now() + 3600000).toISOString(),
 };
+test('cancellation snapshot is versioned, complete and Admin-only; no public participant names',async()=>{
+ const h=await harness();try{
+  assert.equal((await h.call('/api/v2/cancellations')).status,401);
+  for(const role of ['staff','viewer'])assert.equal((await h.call('/api/v2/cancellations','GET',undefined,await h.login(role))).status,403);
+  h.store.cancel(admin,h.event.id,h.participant.id,'fixture cancellation',crypto.randomUUID());
+  const response=await h.call('/api/v2/cancellations','GET',undefined,await h.login());assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+  const result=await response.json();assert.equal(result.version,1);assert.equal(result.complete,true);assert.equal(result.registrations.length,1);assert.equal(result.registrations[0].participantId,h.participant.id);assert.equal(result.registrations[0].name,undefined);
+ }finally{await h.close();}
+});
 async function harness() {
   const store = new Store(":memory:");
   const event = store.createEvent(admin, input, crypto.randomUUID());
