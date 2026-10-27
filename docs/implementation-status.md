@@ -1,5 +1,13 @@
 # Unity QR 2.0 implementation status
 
+## 2026-10-27 Registration and cancellation fixes
+
+- Same-event repeated claims ask whether to reuse an owned participant or register a separate guest, including submissions imported before LINE redemption. Reuse keeps original participant/history and retires only an unused imported registration; attended or other-owned registrations cannot be retired. Pending/completed decisions are auditable and retries remain idempotent.
+- Existing multi-person LINE accounts can select an owned participant for QR or cancellation. Same-title sessions and cancellation confirmations show JST dates and participant names.
+- Admin-only complete cancellation snapshot supports Analytics/Reminder exact claim/submission identity matching. Original Google rows, existing attendance outbox and database schema are unchanged; restoration removes the snapshot cancellation. No name/member-ID identity guesses.
+- 99 unit/API and 7 actual workerd tests, build/typecheck and Chromium legacy15/operations8/ticket-page checks passed. Independent review caught the preimport ordering race; added failing-then-passing regression and re-reviewed without blockers. No production data or real LINE test sends.
+- Cloudflare publication is pending: this environment lacks the owner's API credential, QR administrator password and local deployment state. Use the existing owner Mac `npm run cloud:update` backup/restore-verifying workflow; do not rerun initial migration or bypass ownership/free-plan checks. Analytics supports a safe older-QR capability check. See Analytics docs/qr-cancellation-overlay.md.
+
 ## 2026-10-17 Silent unrelated LINE messages
 
 - Exact reception commands, valid claim messages and existing event buttons remain active; unrelated prose/non-text/oversized messages return no reply. Live name conversations require explicit 名前： notation to prevent thanks/delay notices becoming participants. Existing webhook ignored state skips LINE replies/profile calls.
