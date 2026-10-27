@@ -2,6 +2,7 @@
 
 ## 2026-10-28 Past event visibility
 
+- Release evidence: QR PR20 merged as c701e24 into feature/sheet-authoritative-reception. CI run40596213226 passed Chromium/WebKit. Local npm test passed 99 unit/API +7 workerd +15 legacy browser +11 operations browser +LINE ticket-page checks; build/typecheck succeeded. Analytics PR28 merged as 2bfebbf; all364 tests/build/typecheck and CI passed, with Vercel production commit status success. QR Cloudflare publication and authenticated real-device end-to-end verification remain pending on the owner Mac.
 - Hide reception-ended events from the default event selector and event-management list. The global past-events checkbox restores access to the original participants/history; no automatic archival, deletion, schema or API changes. Existing Admin archive/restore remains available for tests/cancellations.
 - Expiry refresh commits selected event/details together, destroys the old scanner before switching and keeps the original event on failed/delayed detail reads. Unknown reception outcomes pause automatic/past-display switching; definitive 4xx rejection releases the retry key.
 - Regression cases cover same-day ending, overnight/boundary handling (Analytics helper), explicit past access/history retention, live expiry, failed next-event reads, invalid QR and uncertain-response retries, plus small-screen layout. Independent review found and verified both failure-path fixes. Details: docs/past-event-visibility.md.
