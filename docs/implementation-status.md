@@ -2,6 +2,8 @@
 
 ## 2026-10-27 Registration and cancellation fixes
 
+- Release evidence: QR PR19 merged as 26d632a; CI run40417150024 passed including Chromium/WebKit. Analytics PR27 merged as 1fc9aa4; Vercel production commit status succeeded. QR Cloudflare publication is still pending, so the production end-to-end cancellation flow is not claimed complete. Recovery source branches: backup/pre-registration-fixes-20261027 (QR 8b8fc22), backup/pre-qr-cancellation-20261027 (Analytics ce3abdd). These are source backups, not DB backups.
+
 - Same-event repeated claims ask whether to reuse an owned participant or register a separate guest, including submissions imported before LINE redemption. Reuse keeps original participant/history and retires only an unused imported registration; attended or other-owned registrations cannot be retired. Pending/completed decisions are auditable and retries remain idempotent.
 - Existing multi-person LINE accounts can select an owned participant for QR or cancellation. Same-title sessions and cancellation confirmations show JST dates and participant names.
 - Admin-only complete cancellation snapshot supports Analytics/Reminder exact claim/submission identity matching. Original Google rows, existing attendance outbox and database schema are unchanged; restoration removes the snapshot cancellation. No name/member-ID identity guesses.

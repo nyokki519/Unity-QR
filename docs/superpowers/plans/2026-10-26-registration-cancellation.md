@@ -20,22 +20,28 @@
 - Analytics matching is exact and event-scoped; unavailable/old QR must not silently corrupt source or existing attendance synchronization.
 
 ## Task 1 — LINE resubmission and selection
-- [ ] Add failing tests for new claims offering reuse/new selection without a second registration, explicit guests, old duplicates, wrong-subject choices, retries and same-name dates.
-- [ ] Implement claim reservation/decision in server/form-claims.ts; keep original records and names. Implement owned person selection and dates in server/line.ts.
-- [ ] Run relevant tests, typecheck and build; commit.
+- [x] Add failing tests for new claims offering reuse/new selection without a second registration, explicit guests, old duplicates, wrong-subject choices, retries and same-name dates.
+- [x] Implement claim reservation/decision in server/form-claims.ts; keep original records and names. Implement owned person selection and dates in server/line.ts.
+- [x] Run relevant tests, typecheck and build; commit.
 
 ## Task 2 — Cancellation status contract
-- [ ] Add auth/scope/merge/restore snapshot tests. Implement server/cancellations.ts and Admin-only versioned API plus feature flag in server/app.ts.
-- [ ] Do not add unsupported actions to the existing outbox or change database schema.
-- [ ] Run API/workerd regressions and commit.
+- [x] Add auth/scope/restore snapshot tests; review canonical merged-event filtering. Implement server/cancellations.ts and Admin-only versioned API plus feature flag in server/app.ts.
+- [x] Do not add unsupported actions to the existing outbox or change database schema.
+- [x] Run API/workerd regressions and commit.
 
 ## Task 3 — Analytics and Reminder
-- [ ] In nyokki519/unity-analytics implement bounded authenticated QR snapshot pull using existing server credentials and exact claimHash/registration ID overlay in the participant source.
-- [ ] Keep Google rows unchanged. Mark synchronization state explicitly, support old-backend rollout, prevent Reminder from silently using uncertain cancellation state.
-- [ ] Add focused tests for cancelled/restored/ambiguous/missing identifiers/failures and existing Reminder quotas/deduplication. Run full required tests/typecheck/build.
+- [x] In nyokki519/unity-analytics implement bounded authenticated QR snapshot pull using existing server credentials and exact claimHash/registration ID overlay in the participant source.
+- [x] Keep Google rows unchanged. Mark synchronization state explicitly, support old-backend rollout, prevent Reminder from silently using uncertain cancellation state.
+- [x] Add focused tests for cancelled/restored/ambiguous/missing identifiers/failures and existing Reminder quotas/deduplication. Run full required tests/typecheck/build.
 
 ## Delivery
-- [ ] Independent focused security/compatibility review, fix blockers, check secrets/diff.
-- [ ] Commit/push both branches, create PRs, wait CI, merge and verify Vercel deployment.
+- [x] Independent focused security/compatibility review, fix blockers, check secrets/diff.
+- [x] Commit/push both branches, create PRs, wait CI, merge and verify Vercel deployment.
 - [ ] Deploy QR only through backup-verifying update with available legitimate Cloudflare credentials/state. Current environment has no Cloudflare/Vercel secrets and GitHub secret-management access is denied; do not bypass backup or invent production state.
-- [ ] Persist exact deployment state and remaining technical blocks in implementation-status files.
+- [x] Persist exact deployment state and remaining technical blocks in implementation-status files.
+
+## Release evidence (2026-10-27 JST)
+- QR PR19 merged as 26d632a into feature/sheet-authoritative-reception; validation run 40417150024 succeeded, including Chromium/WebKit. Source recovery branch: backup/pre-registration-fixes-20261027 (8b8fc22).
+- Analytics PR27 merged as 1fc9aa4 into main; PR verification succeeded and the production Vercel commit status is success. Source recovery branch: backup/pre-qr-cancellation-20261027 (ce3abdd).
+- Cloudflare credentials, QR administrator password and data/cloud-migration/deployment.json are absent here. No Cloudflare publication or real DB backup was performed. Owner Mac cloud:update remains required; do not claim the source recovery branches are DB backups.
+- Direct production page access is blocked by the managed network; Vercel publication is verified through GitHub deployment status, not an authenticated live cancellation test.
