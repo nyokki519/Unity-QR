@@ -7,6 +7,7 @@ const state = {
   actor: null,
   events: [],
   archivedEvents: [],
+  showPast: false,
   eventId: "",
   view: "dashboard",
   people: [],
@@ -17,6 +18,7 @@ const state = {
   sort: "name",
 };
 const pending = new Map();
+const hasPendingCheckin = () => [...pending.keys()].some(key=>key.startsWith('POSTcheckins'));
 let scanner = null,
   toastTimer = null,
   refreshing = false,
@@ -40,6 +42,7 @@ const date = (value) =>
         minute: "2-digit",
       }).format(new Date(value))
     : "—";
+const visibleEvents = (events=state.events) => events.filter(e => state.showPast || !Number.isFinite(Date.parse(e.closesAt)) || Date.parse(e.closesAt) > Date.now());
 const event = () => state.events.find((e) => e.id === state.eventId);
 const admin = () => state.actor?.role === "Admin",
   write = () => state.actor?.role !== "Viewer";
@@ -122,6 +125,9 @@ async function api(path, body, method = body === undefined ? "GET" : "POST") {
     );
   }
   if (!response.ok) {
+    // Definitive rejection did not commit this operation. Transport/5xx errors
+    // keep the key because their outcome may still be unknown.
+    if (response.status >= 400 && response.status < 500) pending.delete(identity);
     if (response.status === 401 && path !== "login") {
       loggedOut();
     }
@@ -145,6 +151,8 @@ function loggedOut() {
   destroyScanner();
   Object.assign(state, {
     actor: null,
+    showPast: false,
+    archivedEvents: [],
     events: [],
     eventId: "",
     people: [],
@@ -180,7 +188,7 @@ function renderShell() {
     )
     .join(
       "",
-    )}</nav><div class="sidebarFoot">Quietly connected.<br>UNITY COMMUNITY / QR 2.0</div></aside><div class="workspace"><header class="topbar"><p class="eyebrow">COMMUNITY OPERATIONS</p><label class="eventSelect" for="eventSelect">イベント<select id="eventSelect">${state.events.length ? state.events.map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? "selected" : ""}>${esc(e.title)}</option>`).join("") : '<option value="">イベントなし</option>'}</select></label><button class="textButton" data-action="logout">ログアウト</button></header><main class="main" id="main"></main></div></div>`;
+    )}</nav><div class="sidebarFoot">Quietly connected.<br>UNITY COMMUNITY / QR 2.0</div></aside><div class="workspace"><header class="topbar"><p class="eyebrow">COMMUNITY OPERATIONS</p><label class="eventSelect" for="eventSelect">イベント<select id="eventSelect">${visibleEvents().length ? visibleEvents().map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? "selected" : ""}>${esc(e.title)}</option>`).join("") : '<option value="">イベントなし</option>'}</select></label><label class="pastEventsToggle"><input id="showPastEvents" type="checkbox" ${state.showPast ? "checked" : ""}>過去のイベントを表示</label><button class="textButton" data-action="logout">ログアウト</button></header><main class="main" id="main"></main></div></div>`;
   renderView();
 }
 function pageHead(title, description, action = "") {
@@ -286,12 +294,12 @@ function eventsHTML() {
   return (
     pageHead(
       "イベント管理",
-      "開催日時・受付時間・会場と来場状況を確認できます。",
+      "受付終了後は通常一覧から非表示になります。参加者・受付履歴は保存されています。",
       admin()
         ? '<div class="actions"><button class="primary" data-action="newEvent">イベントを作成</button></div>'
         : "",
     ) +
-    `<div class="eventList">${state.events.map((e) => `<article class="eventCard"><p class="eyebrow">${Date.parse(e.closesAt) < Date.now() ? "PAST EVENT" : "UPCOMING EVENT"}</p><h2>${esc(e.title)}</h2><span class="pill">${e.checkedIn}名 受付済み</span><div class="eventMeta"><span>開催<strong>${date(e.startsAt)}</strong></span><span>会場<strong>${esc(e.venue)}</strong></span><span>受付開始<strong>${date(e.opensAt)}</strong></span><span>受付終了<strong>${date(e.closesAt)}</strong></span><span>定員<strong>${e.capacity}名</strong></span>${e.externalId ? `<span>外部ID<strong>${esc(e.externalId)}</strong></span>` : ""}</div><div class="actions"><button class="primary" data-action="selectEvent" data-event="${esc(e.id)}">このイベントを選択</button>${admin() ? `<button class="secondary" data-action="editEvent" data-event="${esc(e.id)}">編集</button><button class="secondary" data-action="mergeEvent" data-event="${esc(e.id)}">イベントをまとめる</button><button class="danger" data-action="archiveEvent" data-event="${esc(e.id)}">削除・中止</button>` : ""}</div></article>`).join("") || empty("イベントがありません。")}</div>` + (admin()?`<details class="panel"><summary>削除・中止・統合済み（${state.archivedEvents.length}件）</summary>${state.archivedEvents.map(e=>`<div class="userRow"><div><strong>${esc(e.title)}</strong><small>${date(e.startsAt)} · ${e.mergedInto?'統合済み':'非表示'} · 履歴は保存されています</small></div>${e.mergedInto?'':`<button class="secondary" data-action="restoreEvent" data-event="${esc(e.id)}">復元</button>`}</div>`).join('')||'<p>対象はありません。</p>'}</details>`:'')
+    `<div class="eventList">${visibleEvents().map((e) => `<article class="eventCard"><p class="eyebrow">${Date.parse(e.closesAt) <= Date.now() ? "PAST EVENT" : "UPCOMING EVENT"}</p><h2>${esc(e.title)}</h2><span class="pill">${e.checkedIn}名 受付済み</span><div class="eventMeta"><span>開催<strong>${date(e.startsAt)}</strong></span><span>会場<strong>${esc(e.venue)}</strong></span><span>受付開始<strong>${date(e.opensAt)}</strong></span><span>受付終了<strong>${date(e.closesAt)}</strong></span><span>定員<strong>${e.capacity}名</strong></span>${e.externalId ? `<span>外部ID<strong>${esc(e.externalId)}</strong></span>` : ""}</div><div class="actions"><button class="primary" data-action="selectEvent" data-event="${esc(e.id)}">このイベントを選択</button>${admin() ? `<button class="secondary" data-action="editEvent" data-event="${esc(e.id)}">編集</button><button class="secondary" data-action="mergeEvent" data-event="${esc(e.id)}">イベントをまとめる</button><button class="danger" data-action="archiveEvent" data-event="${esc(e.id)}">削除・中止</button>` : ""}</div></article>`).join("") || empty("表示するイベントがありません。過去のイベントは上の切替から確認できます。")}</div>` + (admin()?`<details class="panel"><summary>削除・中止・統合済み（${state.archivedEvents.length}件）</summary>${state.archivedEvents.map(e=>`<div class="userRow"><div><strong>${esc(e.title)}</strong><small>${date(e.startsAt)} · ${e.mergedInto?'統合済み':'非表示'} · 履歴は保存されています</small></div>${e.mergedInto?'':`<button class="secondary" data-action="restoreEvent" data-event="${esc(e.id)}">復元</button>`}</div>`).join('')||'<p>対象はありません。</p>'}</details>`:'')
   );
 }
 function lineSettings(s) {
@@ -395,27 +403,26 @@ function renderView() {
     );
 }
 async function load() {
-  const generation = revision;
+  const generation = revision, previousSelection=state.eventId;
   const { events: allEvents } = await api(admin()?"events?includeArchived=1":"events");
   const events=allEvents.filter(e=>!e.archived);
-  state.archivedEvents=allEvents.filter(e=>e.archived);
   if (generation !== revision) return;
-  state.events = events;
-  if (!events.some((e) => e.id === state.eventId))
-    state.eventId = events[0]?.id || "";
-  if (state.eventId) {
-    const selected = state.eventId;
+  const choices=visibleEvents(events);
+  const selected=choices.some(e=>e.id===previousSelection)?previousSelection:choices[0]?.id||'';
+  let nextPeople=[],nextHistory=[];
+  if (selected) {
     const [people, history] = await Promise.all([
       api("participants?event=" + selected),
       api("history?event=" + selected),
     ]);
-    if (generation !== revision || selected !== state.eventId) return;
-    state.people = people.participants;
-    state.history = history.history;
-  } else {
-    state.people = [];
-    state.history = [];
+    nextPeople=people.participants;nextHistory=history.history;
   }
+  // Keep scanner selection and the visible event together until all reads
+  // succeed; a late response must not switch an in-flight reception.
+  if(generation!==revision||previousSelection!==state.eventId||hasPendingCheckin())return;
+  if(selected!==state.eventId)destroyScanner();
+  state.events=events;state.archivedEvents=allEvents.filter(e=>e.archived);
+  state.eventId=selected;state.people=nextPeople;state.history=nextHistory;
   if (admin() && state.view === "settings")
     state.settings = await api("settings");
 }
@@ -504,6 +511,7 @@ async function checkTicket(ticket, selected = state.eventId) {
     );
     scanner?.feedback(document.querySelector("#sound")?.checked);
     await load();
+    if(selected!==state.eventId)renderShell();
   } catch (e) {
     if (result) result.textContent = e.message;
     notify(e.message, true);
@@ -835,6 +843,12 @@ document.addEventListener("input", (e) => {
   }
 });
 document.addEventListener("change", async (e) => {
+  if (e.target.id === "showPastEvents") {
+    if (navigating || hasPendingCheckin()) { e.target.checked=state.showPast; notify("未確認の受付を完了してから表示を切り替えてください。",true); return; }
+    state.showPast=e.target.checked;
+    await navigate(state.view);
+    return;
+  }
   if (e.target.id === "eventSelect") {
     await navigate(state.view, e.target.value);
   }
@@ -850,16 +864,19 @@ setInterval(async () => {
     refreshing ||
     navigating ||
     modal.open ||
-    ["settings", "events"].includes(state.view) ||
+    state.view === "settings" ||
+    hasPendingCheckin() ||
     Date.now() - lastRefresh < (state.actor.pollIntervalMs || 8000)
   )
     return;
   refreshing = true;
   lastRefresh = Date.now();
   try {
+    const previousEvent=state.eventId, previousOptions=[...document.querySelector("#eventSelect").options].map(o=>o.value).filter(Boolean).join('|');
     await load();
     if (!state.actor || navigating) return;
-    if (state.view === "dashboard" || state.view === "history") renderView();
+    if(previousEvent!==state.eventId || previousOptions!==visibleEvents().map(e=>e.id).join('|')){destroyScanner();renderShell();return;}
+    if (["dashboard", "history", "events"].includes(state.view)) renderView();
     else if (state.view === "participants") {
       document.querySelector("#people").innerHTML = peopleHTML();
       const selected = event();

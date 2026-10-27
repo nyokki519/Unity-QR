@@ -25,6 +25,8 @@ const person = store.register(
   { name: "Yuki" },
   crypto.randomUUID(),
 );
+const endedEvent=store.createEvent(admin,{title:'終了済みテスト',venue:'Tokyo',capacity:20,startsAt:new Date(Date.now()-7200000).toISOString(),opensAt:new Date(Date.now()-10800000).toISOString(),closesAt:new Date(Date.now()-3600000).toISOString()},crypto.randomUUID());
+store.register(admin,endedEvent.id,{name:'履歴保持テスト'},crypto.randomUUID());
 store.register(admin, event.id, { name: "Yuki" }, crypto.randomUUID());
 for (const role of ["Admin", "Staff", "Viewer"] as const)
   store.addUser(
@@ -96,6 +98,37 @@ async function run(
   }
 }
 try {
+  await run('Past events are hidden by reception end and can be reopened without losing participants',async(page)=>{
+    await expect(page.locator('#eventSelect option').filter({hasText:'終了済みテスト'})).toHaveCount(0);
+    await page.getByRole('button',{name:'イベント',exact:true}).click();
+    await expect(page.locator('.eventCard').filter({hasText:'終了済みテスト'})).toHaveCount(0);
+    await page.getByLabel('過去のイベントを表示',{exact:true}).check();
+    const card=page.locator('.eventCard').filter({hasText:'終了済みテスト'});await expect(card).toHaveCount(1);
+    await card.getByRole('button',{name:'このイベントを選択',exact:true}).click();
+    await expect(page.locator('#eventSelect')).toHaveValue(endedEvent.id);
+    await page.getByRole('button',{name:'参加者',exact:true}).click();await expect(page.locator('#people')).toContainText('履歴保持テスト');
+    await page.getByLabel('過去のイベントを表示',{exact:true}).uncheck();await expect(page.locator('#eventSelect')).not.toHaveValue(endedEvent.id);
+    assert.equal(store.summary(admin,endedEvent.id).total,1);assert.equal(store.event(admin,endedEvent.id).archived,false);
+  });
+  await run('An event ending while open clears the selected participants and remains available in history',async(page)=>{
+    await page.clock.setFixedTime(new Date(Date.now()+7200000));
+    await expect(page.locator('#eventSelect')).toHaveValue('',{timeout:12000});
+    await page.getByLabel('過去のイベントを表示',{exact:true}).check();
+    await expect(page.locator('#eventSelect option').filter({hasText:'UNITY NIGHT'})).toHaveCount(1);
+    assert.equal(store.event(admin,event.id).archived,false);
+  });
+  await run('A delayed failed next-event read keeps the original event selection intact',async(page)=>{
+    const next=store.createEvent(admin,{title:'次の受付テスト',venue:'Tokyo',capacity:20,startsAt:new Date(Date.now()+7200000).toISOString(),opensAt:new Date(Date.now()+3600000).toISOString(),closesAt:new Date(Date.now()+14400000).toISOString()},crypto.randomUUID());
+    let release:()=>void=()=>{},started=false;const gate=new Promise<void>(r=>release=r);
+    try{
+      await page.route('**/api/v2/participants?event='+next.id,async(route:Route)=>{started=true;await gate;await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'fixture_unavailable'})});});
+      await page.clock.setFixedTime(new Date(Date.now()+7200000));
+      await expect.poll(()=>started,{timeout:12000}).toBe(true);await expect(page.locator('#eventSelect')).toHaveValue(event.id);
+      release();await expect(page.getByRole('status')).toContainText('操作を完了できませんでした');
+      await page.unroute('**/api/v2/participants?event='+next.id);
+      await page.getByLabel('過去のイベントを表示',{exact:true}).check();await expect(page.locator('#eventSelect')).toHaveValue(event.id);
+    }finally{release();store.archiveEvent(admin,next.id,'fixture cleanup',crypto.randomUUID());}
+  });
   await run(
     "dashboard, search, same-name distinction, manual arrival and audited undo",
     async (page) => {
@@ -157,6 +190,8 @@ try {
       await expect(page.getByRole("status")).toContainText(
         "QRが正しくありません",
       );
+      await page.getByLabel('過去のイベントを表示',{exact:true}).check();
+      await page.getByLabel('過去のイベントを表示',{exact:true}).uncheck();
       await page.getByRole("button", { name: "カメラを開始" }).click();
       await expect(page.locator("#cameraStatus")).toContainText(
         /許可|カメラ|利用/,
@@ -186,6 +221,8 @@ try {
       await page.getByLabel("名前で検索").fill("Retry Guest");
       await page.getByRole("button", { name: "受付する", exact: true }).click();
       await expect(page.getByRole("status")).toContainText("通信");
+      await page.getByLabel('過去のイベントを表示',{exact:true}).click();
+      await expect(page.getByLabel('過去のイベントを表示',{exact:true})).not.toBeChecked();
       await page.getByRole("button", { name: "受付する", exact: true }).click();
       await expect(page.getByRole("status")).toContainText(
         "受付を確定しました",

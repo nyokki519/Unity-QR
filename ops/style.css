@@ -298,13 +298,28 @@ small {
   min-width: 0;
 }
 .topbar {
-  height: 84px;
+  min-height: 84px;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 42px;
+  padding: 12px 42px;
   border-bottom: 1px solid var(--line);
   gap: 20px;
+}
+.pastEventsToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.pastEventsToggle input {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  margin: 0;
 }
 .topbar .eyebrow {
   margin: 0;
