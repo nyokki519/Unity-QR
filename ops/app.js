@@ -6,6 +6,8 @@ const root = document.querySelector("#app"),
 const state = {
   actor: null,
   events: [],
+  archivedEvents: [],
+  showPast: false,
   eventId: "",
   view: "dashboard",
   people: [],
@@ -16,6 +18,7 @@ const state = {
   sort: "name",
 };
 const pending = new Map();
+const hasPendingCheckin = () => [...pending.keys()].some(key=>key.startsWith('POSTcheckins'));
 let scanner = null,
   toastTimer = null,
   refreshing = false,
@@ -39,6 +42,7 @@ const date = (value) =>
         minute: "2-digit",
       }).format(new Date(value))
     : "—";
+const visibleEvents = (events=state.events) => events.filter(e => state.showPast || !Number.isFinite(Date.parse(e.closesAt)) || Date.parse(e.closesAt) > Date.now());
 const event = () => state.events.find((e) => e.id === state.eventId);
 const admin = () => state.actor?.role === "Admin",
   write = () => state.actor?.role !== "Viewer";
@@ -49,6 +53,13 @@ const errors = {
   invalid_qr:
     "QRが正しくありません。このイベントの参加者QRを使用してください。",
   qr_expired: "QRの有効期限が切れています。再発行してください。",
+  event_archived: "このイベントは中止・削除・統合済みです。",
+  event_merged: "統合元は単独で復元できません。統合先を確認してください。",
+  merge_date_mismatch: "同じ開催日のイベントを選んでください。",
+  merge_has_attendance: "受付・取消履歴があるイベントは統合できません。履歴保護のため個別に管理してください。",
+  merge_preview_changed: "確認後に申込や設定が変わりました。統合内容を再確認してください。",
+  merge_registration_conflict: "同じ参加者の申込状態が異なります。参加取消を確認してください。",
+  invalid_event_merge: "異なる統合先イベントを選んでください。",
   event_closed: "このイベントは受付時間外です。",
   capacity_reached: "定員に達しています。運営責任者に確認してください。",
   registration_cancelled: "参加登録がキャンセルされています。",
@@ -114,6 +125,9 @@ async function api(path, body, method = body === undefined ? "GET" : "POST") {
     );
   }
   if (!response.ok) {
+    // Definitive rejection did not commit this operation. Transport/5xx errors
+    // keep the key because their outcome may still be unknown.
+    if (response.status >= 400 && response.status < 500) pending.delete(identity);
     if (response.status === 401 && path !== "login") {
       loggedOut();
     }
@@ -137,6 +151,8 @@ function loggedOut() {
   destroyScanner();
   Object.assign(state, {
     actor: null,
+    showPast: false,
+    archivedEvents: [],
     events: [],
     eventId: "",
     people: [],
@@ -150,7 +166,7 @@ function loggedOut() {
   renderLogin();
 }
 const brand =
-  '<div class="brand"><span class="seal">U</span><div><strong>UNITY</strong><small>COMMUNITY OPERATIONS</small></div></div>';
+  '<div class="brand"><img class="seal unityLogo" src="/assets/unity-logo.webp" alt="Unity" width="64" height="64"><div><strong>UNITY</strong><small>COMMUNITY OPERATIONS</small></div></div>';
 function renderLogin() {
   root.innerHTML = `<main class="login"><section class="loginStory">${brand}<div><p class="eyebrow">UNITY QR / 2.0</p><h1>A quieter<br>welcome.</h1><p>出会いのはじまりを、心地よく。<br>Unityの時間をつなぐ、イベント受付。</p></div><footer>ONE COMMUNITY. MANY SHARED MOMENTS.</footer></section><section class="loginForm"><div><p class="eyebrow">OPERATIONS ACCESS</p><h2>運営ログイン</h2><form id="loginForm"><label>ユーザー名<input name="username" autocomplete="username" required maxlength="60"></label><label>パスワード<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label><p class="errorNote" id="loginError" role="alert"></p><button class="primary full" type="submit">ログイン</button></form><p class="loginNote muted">許可されたイベントの受付・参加者管理にアクセスします。<br>参加者向けの会員証・受付は<a href="../">こちら</a>。</p></div></section></main>`;
 }
@@ -172,7 +188,7 @@ function renderShell() {
     )
     .join(
       "",
-    )}</nav><div class="sidebarFoot">Quietly connected.<br>UNITY COMMUNITY / QR 2.0</div></aside><div class="workspace"><header class="topbar"><p class="eyebrow">COMMUNITY OPERATIONS</p><label class="eventSelect" for="eventSelect">イベント<select id="eventSelect">${state.events.length ? state.events.map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? "selected" : ""}>${esc(e.title)}</option>`).join("") : '<option value="">イベントなし</option>'}</select></label><button class="textButton" data-action="logout">ログアウト</button></header><main class="main" id="main"></main></div></div>`;
+    )}</nav><div class="sidebarFoot">Quietly connected.<br>UNITY COMMUNITY / QR 2.0</div></aside><div class="workspace"><header class="topbar"><p class="eyebrow">COMMUNITY OPERATIONS</p><label class="eventSelect" for="eventSelect">イベント<select id="eventSelect">${visibleEvents().length ? visibleEvents().map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? "selected" : ""}>${esc(e.title)}</option>`).join("") : '<option value="">イベントなし</option>'}</select></label><label class="pastEventsToggle"><input id="showPastEvents" type="checkbox" ${state.showPast ? "checked" : ""}>過去のイベントを表示</label><button class="textButton" data-action="logout">ログアウト</button></header><main class="main" id="main"></main></div></div>`;
   renderView();
 }
 function pageHead(title, description, action = "") {
@@ -244,7 +260,7 @@ function peopleHTML() {
     ? list
         .map(
           (p) =>
-            `<article class="person" data-event="${esc(state.eventId)}"><div class="personInfo"><span class="pill ${esc(p.status)}">${{ checkedIn: "受付済み", waiting: "未受付", cancelled: "キャンセル" }[p.status]}</span><h3>${esc(p.name)}</h3><small>ID ${esc(p.id.slice(0, 8))}${p.memberId ? ` · PASS ${esc(p.memberId)}` : ""}${p.lineLinked ? " · LINE連携" : ""}${Number.isInteger(p.visits) ? ` · 来場 ${p.visits}回` : ""}${p.status === "checkedIn" ? ` · ${date(p.checkedInAt)}` : ""}</small>${p.nameMatches > 1 ? '<span class="duplicate">同名の参加者がいます。IDで確認してください。</span>' : ""}</div><div class="actions">${write() && p.status === "waiting" ? `<button class="primary" data-action="checkin" data-person="${esc(p.id)}">受付する</button>` : ""}${write() && p.status !== "cancelled" ? `<button class="secondary" data-action="ticket" data-person="${esc(p.id)}">QRを表示</button>` : ""}${admin() ? `<button class="textButton" data-action="rename" data-person="${esc(p.id)}">編集</button>${p.status === "checkedIn" ? `<button class="danger" data-action="undo" data-person="${esc(p.id)}">受付取消</button>` : p.status === "waiting" ? `<button class="textButton" data-action="cancel" data-person="${esc(p.id)}">参加取消</button>` : `<button class="secondary" data-action="restore" data-person="${esc(p.id)}">取消を解除</button>`}` : ""}</div></article>`,
+            `<article class="person" data-event="${esc(state.eventId)}"><div class="personInfo"><span class="pill ${esc(p.status)}">${{ checkedIn: "受付済み", waiting: "未受付", cancelled: "キャンセル" }[p.status]}</span><h3>${esc(p.name)}</h3><small>ID ${esc(p.id.slice(0, 8))}${p.memberId ? ` · PASS ${esc(p.memberId)}` : ""}${p.lineLinked ? " · LINE連携" : ""}${Number.isInteger(p.visits) ? ` · 来場 ${p.visits}回` : ""}${p.status === "checkedIn" ? ` · ${date(p.checkedInAt)}` : ""}</small>${p.nameMatches > 1 ? '<span class="duplicate">同名の参加者がいます。IDで確認してください。</span>' : ""}</div><div class="actions">${write() && p.status === "waiting" ? `<button class="primary" data-action="checkin" data-person="${esc(p.id)}">受付する</button>` : ""}${write() && p.status !== "cancelled" ? `<button class="secondary" data-action="ticket" data-person="${esc(p.id)}">QRを表示</button><button class="secondary" data-action="ticketLink" data-person="${esc(p.id)}">QRリンクを発行</button>` : ""}${admin() ? `<button class="textButton" data-action="rename" data-person="${esc(p.id)}">編集</button>${p.status === "checkedIn" ? `<button class="danger" data-action="undo" data-person="${esc(p.id)}">受付取消</button>` : p.status === "waiting" ? `<button class="textButton" data-action="cancel" data-person="${esc(p.id)}">参加取消</button>` : `<button class="secondary" data-action="restore" data-person="${esc(p.id)}">取消を解除</button>`}` : ""}</div></article>`,
         )
         .join("")
     : '<div class="empty">条件に一致する参加者はいません。</div>';
@@ -270,7 +286,7 @@ function scannerHTML() {
       "参加者QRを読み取り、サーバーで受付を確定します。",
     ) +
     (event()
-      ? `<div class="grid"><section class="panel"><div class="cameraBox"><span class="cameraPlaceholder">U</span><video id="camera" autoplay muted playsinline></video><div class="scanFrame"></div></div><p class="cameraHint" id="cameraStatus" aria-live="polite">背面カメラを優先します。HTTPSとカメラの許可が必要です。</p><div class="scannerControls"><button class="primary" data-action="cameraStart">カメラを開始</button><button class="secondary" data-action="cameraStop">停止</button></div><label class="hint checkboxes"><span><input id="sound" type="checkbox">確認音を使う（対応端末のみ）</span></label></section><section class="panel"><div class="panelHead"><h2>読取結果</h2><span class="eyebrow">SERVER VERIFIED</span></div><div id="scanResult" class="scanResult"><strong>読取を待っています。</strong><span>受付確定後、ここに参加者名が表示されます。</span></div><form id="ticketForm" data-event="${esc(state.eventId)}"><label>QRの文字列<textarea name="ticket" maxlength="2048" required placeholder="カメラを使えない場合は文字列を貼り付け"></textarea></label><button class="primary full" type="submit">QRを確認して受付</button></form><p class="hint">通信できない場合、受付完了にはなりません。再試行するか、接続のあるスタッフ端末を使用してください。</p><button class="secondary full" data-view="participants">参加者検索へ</button></section></div>`
+      ? `<div class="grid"><section class="panel"><div class="cameraBox"><img class="cameraPlaceholder unityLogo" src="/assets/unity-logo.webp" alt="Unity" width="112" height="112"><video id="camera" autoplay muted playsinline></video><div class="scanFrame"></div></div><p class="cameraHint" id="cameraStatus" aria-live="polite">背面カメラを優先します。HTTPSとカメラの許可が必要です。</p><div class="scannerControls"><button class="primary" data-action="cameraStart">カメラを開始</button><button class="secondary" data-action="cameraStop">停止</button></div><label class="hint checkboxes"><span><input id="sound" type="checkbox">確認音を使う（対応端末のみ）</span></label></section><section class="panel"><div class="panelHead"><h2>読取結果</h2><span class="eyebrow">SERVER VERIFIED</span></div><div id="scanResult" class="scanResult"><strong>読取を待っています。</strong><span>受付確定後、ここに参加者名が表示されます。</span></div><form id="ticketForm" data-event="${esc(state.eventId)}"><label>QRの文字列<textarea name="ticket" maxlength="2048" required placeholder="カメラを使えない場合は文字列を貼り付け"></textarea></label><button class="primary full" type="submit">QRを確認して受付</button></form><p class="hint">通信できない場合、受付完了にはなりません。再試行するか、接続のあるスタッフ端末を使用してください。</p><button class="secondary full" data-view="participants">参加者検索へ</button></section></div>`
       : empty("受付するイベントを選択してください。"))
   );
 }
@@ -278,12 +294,12 @@ function eventsHTML() {
   return (
     pageHead(
       "イベント管理",
-      "開催日時・受付時間・会場と来場状況を確認できます。",
+      "受付終了後は通常一覧から非表示になります。参加者・受付履歴は保存されています。",
       admin()
         ? '<div class="actions"><button class="primary" data-action="newEvent">イベントを作成</button></div>'
         : "",
     ) +
-    `<div class="eventList">${state.events.map((e) => `<article class="eventCard"><p class="eyebrow">${Date.parse(e.closesAt) < Date.now() ? "PAST EVENT" : "UPCOMING EVENT"}</p><h2>${esc(e.title)}</h2><span class="pill">${e.checkedIn}名 受付済み</span><div class="eventMeta"><span>開催<strong>${date(e.startsAt)}</strong></span><span>会場<strong>${esc(e.venue)}</strong></span><span>受付開始<strong>${date(e.opensAt)}</strong></span><span>受付終了<strong>${date(e.closesAt)}</strong></span><span>定員<strong>${e.capacity}名</strong></span>${e.externalId ? `<span>外部ID<strong>${esc(e.externalId)}</strong></span>` : ""}</div><div class="actions"><button class="primary" data-action="selectEvent" data-event="${esc(e.id)}">このイベントを選択</button>${admin() ? `<button class="secondary" data-action="editEvent" data-event="${esc(e.id)}">編集</button>` : ""}</div></article>`).join("") || empty("イベントがありません。")}</div>`
+    `<div class="eventList">${visibleEvents().map((e) => `<article class="eventCard"><p class="eyebrow">${Date.parse(e.closesAt) <= Date.now() ? "PAST EVENT" : "UPCOMING EVENT"}</p><h2>${esc(e.title)}</h2><span class="pill">${e.checkedIn}名 受付済み</span><div class="eventMeta"><span>開催<strong>${date(e.startsAt)}</strong></span><span>会場<strong>${esc(e.venue)}</strong></span><span>受付開始<strong>${date(e.opensAt)}</strong></span><span>受付終了<strong>${date(e.closesAt)}</strong></span><span>定員<strong>${e.capacity}名</strong></span>${e.externalId ? `<span>外部ID<strong>${esc(e.externalId)}</strong></span>` : ""}</div><div class="actions"><button class="primary" data-action="selectEvent" data-event="${esc(e.id)}">このイベントを選択</button>${admin() ? `<button class="secondary" data-action="editEvent" data-event="${esc(e.id)}">編集</button><button class="secondary" data-action="mergeEvent" data-event="${esc(e.id)}">イベントをまとめる</button><button class="danger" data-action="archiveEvent" data-event="${esc(e.id)}">削除・中止</button>` : ""}</div></article>`).join("") || empty("表示するイベントがありません。過去のイベントは上の切替から確認できます。")}</div>` + (admin()?`<details class="panel"><summary>削除・中止・統合済み（${state.archivedEvents.length}件）</summary>${state.archivedEvents.map(e=>`<div class="userRow"><div><strong>${esc(e.title)}</strong><small>${date(e.startsAt)} · ${e.mergedInto?'統合済み':'非表示'} · 履歴は保存されています</small></div>${e.mergedInto?'':`<button class="secondary" data-action="restoreEvent" data-event="${esc(e.id)}">復元</button>`}</div>`).join('')||'<p>対象はありません。</p>'}</details>`:'')
   );
 }
 function lineSettings(s) {
@@ -387,25 +403,26 @@ function renderView() {
     );
 }
 async function load() {
-  const generation = revision;
-  const { events } = await api("events");
+  const generation = revision, previousSelection=state.eventId;
+  const { events: allEvents } = await api(admin()?"events?includeArchived=1":"events");
+  const events=allEvents.filter(e=>!e.archived);
   if (generation !== revision) return;
-  state.events = events;
-  if (!events.some((e) => e.id === state.eventId))
-    state.eventId = events[0]?.id || "";
-  if (state.eventId) {
-    const selected = state.eventId;
+  const choices=visibleEvents(events);
+  const selected=choices.some(e=>e.id===previousSelection)?previousSelection:choices[0]?.id||'';
+  let nextPeople=[],nextHistory=[];
+  if (selected) {
     const [people, history] = await Promise.all([
       api("participants?event=" + selected),
       api("history?event=" + selected),
     ]);
-    if (generation !== revision || selected !== state.eventId) return;
-    state.people = people.participants;
-    state.history = history.history;
-  } else {
-    state.people = [];
-    state.history = [];
+    nextPeople=people.participants;nextHistory=history.history;
   }
+  // Keep scanner selection and the visible event together until all reads
+  // succeed; a late response must not switch an in-flight reception.
+  if(generation!==revision||previousSelection!==state.eventId||hasPendingCheckin())return;
+  if(selected!==state.eventId)destroyScanner();
+  state.events=events;state.archivedEvents=allEvents.filter(e=>e.archived);
+  state.eventId=selected;state.people=nextPeople;state.history=nextHistory;
   if (admin() && state.view === "settings")
     state.settings = await api("settings");
 }
@@ -494,6 +511,7 @@ async function checkTicket(ticket, selected = state.eventId) {
     );
     scanner?.feedback(document.querySelector("#sound")?.checked);
     await load();
+    if(selected!==state.eventId)renderShell();
   } catch (e) {
     if (result) result.textContent = e.message;
     notify(e.message, true);
@@ -569,6 +587,14 @@ document.addEventListener("submit", async (e) => {
         "受付イベントを紐付けました。参加者は同じ申込メッセージからQRを受け取れます。",
       );
     }
+    if(form.id==='eventArchiveForm'){
+      await api('events/'+form.dataset.action,{eventId:form.dataset.event,reason:values.reason});await afterMutation(form.dataset.action==='restore'?'イベントを復元しました。':'イベントを一覧から削除しました。履歴は保持しています。');
+    }
+    if(form.id==='eventMergeForm'){
+      const p=await api('events/merge-preview',{sourceId:form.dataset.event,targetId:values.targetId});
+      dialog('イベント統合を確認',`<p><strong>${esc(p.source.title)}</strong>（${p.sourceCount}名）を <strong>${esc(p.target.title)}</strong>（${p.targetCount}名）へまとめます。</p><p>統合後：${p.resultCount}名。統合先の受付時間・定員・会場を使います。</p><p>${date(p.target.opensAt)} — ${date(p.target.closesAt)} · ${esc(p.target.venue)} · 定員 ${p.target.capacity}名</p><p class="hint">統合は元に戻せません。元のイベントは非表示になり、発行済みQRリンクは統合先へ引き継ぎます。参加者を名前で同一人物と判定しません。${p.sameNameGroups?'同姓同名の候補があります。本人確認して個別に受付してください。':''}</p><form id="eventMergeConfirm"><input type="hidden" name="sourceId" value="${esc(p.source.id)}"><input type="hidden" name="targetId" value="${esc(p.target.id)}"><input type="hidden" name="fingerprint" value="${esc(p.fingerprint)}"><button class="danger full">確認してイベントを統合</button></form>`);
+    }
+    if(form.id==='eventMergeConfirm'){await api('events/merge',values);state.eventId=values.targetId;await afterMutation('イベントを統合しました。参加者は個別に保持しています。');}
     if (form.id === "lineEventForm") {
       await api("line/events", {
         eventId: form.dataset.event,
@@ -659,6 +685,16 @@ document.addEventListener("click", async (e) => {
     actionRevision = revision;
   if (!action) return;
   try {
+    if(['archiveEvent','restoreEvent'].includes(action)&&admin()){
+      const item=[...state.events,...state.archivedEvents].find(e=>e.id===button.dataset.event);if(!item)return;
+      dialog(action==='restoreEvent'?'イベントを復元':'イベントを削除・中止',`<p>${esc(item.title)}</p><p class="hint">削除は一覧からの非表示です。参加者と受付履歴を保持し、後から復元できます。削除中はQR発行・受付を停止します。</p><form id="eventArchiveForm" data-event="${esc(item.id)}" data-action="${action==='restoreEvent'?'restore':'archive'}"><label>理由<input name="reason" required maxlength="240"></label><button class="danger full">${action==='restoreEvent'?'復元する':'確認して削除・中止'}</button></form>`);
+    }
+    if(action==='mergeEvent'&&admin()){
+      const source=state.events.find(e=>e.id===button.dataset.event);if(!source)return;
+      const day=value=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date(value));
+      const targets=state.events.filter(e=>e.id!==source.id&&day(e.startsAt)===day(source.startsAt));
+      dialog('登録イベントをまとめる',`<p>統合元：${esc(source.title)}</p><p class="hint">同じ開催日の統合先を選びます。受付・取消履歴がある場合は統合せず個別管理してください。</p>${targets.length?`<form id="eventMergeForm" data-event="${esc(source.id)}"><label>統合先<select name="targetId" aria-label="統合先" required><option value="">選択してください</option>${targets.map(e=>`<option value="${esc(e.id)}">${esc(e.title)} · ${e.total}名</option>`).join('')}</select></label><button class="primary full">統合内容を確認</button></form>`:'<p>同日の統合先イベントがありません。</p>'}`);
+    }
     if (action === "logout") {
       await api("logout", {});
       loggedOut();
@@ -729,6 +765,11 @@ document.addEventListener("click", async (e) => {
           ? "このイベントは受付済みです。"
           : "受付を確定しました。",
       );
+    }
+    if(action === "ticketLink") {
+      const result=await api("participant-link",{eventId:renderedEvent,participantId:id});
+      if(renderedEvent!==state.eventId||actionRevision!==revision||!state.actor)return;
+      dialog("参加者専用QRリンク",`<p class="hint">本人にだけ送ってください。開催前はイベント情報を表示し、受付時間内にQRを表示します。</p><label>専用リンク<input readonly value="${esc(result.url)}"></label><a class="secondary" href="${esc(result.url)}" target="_blank" rel="noopener noreferrer">参加者QRを開く</a>`);
     }
     if (action === "ticket") {
       const ticket = await api(
@@ -802,6 +843,12 @@ document.addEventListener("input", (e) => {
   }
 });
 document.addEventListener("change", async (e) => {
+  if (e.target.id === "showPastEvents") {
+    if (navigating || hasPendingCheckin()) { e.target.checked=state.showPast; notify("未確認の受付を完了してから表示を切り替えてください。",true); return; }
+    state.showPast=e.target.checked;
+    await navigate(state.view);
+    return;
+  }
   if (e.target.id === "eventSelect") {
     await navigate(state.view, e.target.value);
   }
@@ -817,16 +864,19 @@ setInterval(async () => {
     refreshing ||
     navigating ||
     modal.open ||
-    ["settings", "events"].includes(state.view) ||
+    state.view === "settings" ||
+    hasPendingCheckin() ||
     Date.now() - lastRefresh < (state.actor.pollIntervalMs || 8000)
   )
     return;
   refreshing = true;
   lastRefresh = Date.now();
   try {
+    const previousEvent=state.eventId, previousOptions=[...document.querySelector("#eventSelect").options].map(o=>o.value).filter(Boolean).join('|');
     await load();
     if (!state.actor || navigating) return;
-    if (state.view === "dashboard" || state.view === "history") renderView();
+    if(previousEvent!==state.eventId || previousOptions!==visibleEvents().map(e=>e.id).join('|')){destroyScanner();renderShell();return;}
+    if (["dashboard", "history", "events"].includes(state.view)) renderView();
     else if (state.view === "participants") {
       document.querySelector("#people").innerHTML = peopleHTML();
       const selected = event();

@@ -19,6 +19,15 @@ const input = {
   opensAt: new Date(Date.now() - 60000).toISOString(),
   closesAt: new Date(Date.now() + 3600000).toISOString(),
 };
+test('cancellation snapshot is versioned, complete and Admin-only; no public participant names',async()=>{
+ const h=await harness();try{
+  assert.equal((await h.call('/api/v2/cancellations')).status,401);
+  for(const role of ['staff','viewer'])assert.equal((await h.call('/api/v2/cancellations','GET',undefined,await h.login(role))).status,403);
+  h.store.cancel(admin,h.event.id,h.participant.id,'fixture cancellation',crypto.randomUUID());
+  const response=await h.call('/api/v2/cancellations','GET',undefined,await h.login());assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+  const result=await response.json();assert.equal(result.version,1);assert.equal(result.complete,true);assert.equal(result.registrations.length,1);assert.equal(result.registrations[0].participantId,h.participant.id);assert.equal(result.registrations[0].name,undefined);
+ }finally{await h.close();}
+});
 async function harness() {
   const store = new Store(":memory:");
   const event = store.createEvent(admin, input, crypto.randomUUID());
@@ -563,4 +572,15 @@ test("a committed PASS receipt retries without reverifying a consumed or unavail
     t.mock.restoreAll();
     await h.close();
   }
+});
+test('participant private link API requires authentication, scoped write role, idempotency and real registration',async()=>{
+ const h=await harness();try{
+ const body={eventId:h.event.id,participantId:h.participant.id};assert.equal((await h.call('/api/v2/participant-link','POST',body)).status,401);
+ const viewer=await h.login('viewer');assert.equal((await h.call('/api/v2/participant-link','POST',body,viewer)).status,403);
+ const staff=await h.login('staff'),key=crypto.randomUUID();const first=await h.call('/api/v2/participant-link','POST',body,staff,h.config.origin,key);assert.equal(first.status,200);const link=await first.json();assert.match(link.url,/\/ticket\/#([a-f0-9]{64})$/);
+ const replay=await h.call('/api/v2/participant-link','POST',body,staff,h.config.origin,key);assert.deepEqual(await replay.json(),link);
+ const raw=link.url.split('#')[1];const ticket=await fetch(h.config.origin+'/api/v2/line/ticket',{headers:{Authorization:'Bearer '+raw}});assert.equal(ticket.status,200);const page=await ticket.json();assert.equal(page.name,'API Yuki');assert.equal(page.event.title,h.event.title);assert.match(page.qr,/<svg/);
+ assert.equal((await h.call('/api/v2/participant-link','POST',{...body,participantId:undefined},staff)).status,400);
+ assert.equal((await h.call('/api/v2/participant-link','POST',{...body,eventId:crypto.randomUUID()},staff)).status,403);
+ }finally{await h.close();}
 });

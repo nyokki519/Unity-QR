@@ -1,7 +1,11 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { ReceptionStore, Actor } from "./store-core.js";
-import { digest, fail, text } from "./security.js";
+import { ApiError, digest, fail, text } from "./security.js";
+import {normalizedEventName,similarReceptionEventNames} from "./event-names.js";
 const system: Actor = { id: "system:form", role: "Admin", events: [] };
+export class ClaimSelectionRequired extends ApiError {
+  constructor(public choice:{claimHash:string;eventId:string;title:string;startsAt:string;name:string;people:any[]}) { super(409,'claim_selection_required'); }
+}
 export function japanDate(value: string) {
   return new Intl.DateTimeFormat("sv-SE", {
     timeZone: "Asia/Tokyo",
@@ -143,23 +147,60 @@ export class FormClaims {
       },
     );
   }
+  private autoReception(claim: any) {
+    const key=claim.external_event_id,day=claim.event_date,name=claim.event_name;
+    // Claims exist only after the authenticated Form bridge accepts a response.
+    // Published IDs may create receptions too; malformed internal keys remain rejected.
+    if(key.startsWith("sheet-event:")&&key!=="sheet-event:"+digest(JSON.stringify([day,normalizedEventName(name)]))) return;
+    if(Date.parse(day+"T00:00:00+09:00")+86400000<=Date.now())fail("event_closed",410);
+    const rows=this.db.rows("SELECT id,title,starts_at FROM events WHERE strftime('%Y-%m-%d',starts_at,'+9 hours')=?",day);
+    const candidates=rows.map((event:any)=>{
+      const evidence=this.db.rows("SELECT DISTINCT c.event_name name FROM form_claims c JOIN form_event_mappings m ON m.external_event_id=c.external_event_id AND m.event_date=c.event_date WHERE m.event_id=?",event.id).map((row:any)=>row.name);
+      const root=this.db.event(system,this.db.canonicalEvent(event.id));
+      return {event:root,names:[event.title,...evidence]};
+    }).filter(({names}:any)=>names.some((other:string)=>similarReceptionEventNames(other,name)));
+    const roots=new Set(candidates.map(c=>c.event.id));
+    if(roots.size>1||candidates.some(({names}:any)=>!names.every((other:string)=>similarReceptionEventNames(other,name))))fail("claim_event_ambiguous",409);
+    if(candidates.some(c=>c.event.archived))fail("event_archived",409);
+    let eventId=candidates[0]?.event.id;
+    if(eventId){
+      const opaque=this.db.rows("SELECT external_event_id key FROM form_event_mappings m WHERE m.event_id=? AND m.external_event_id LIKE 'sheet-event:%' AND NOT EXISTS(SELECT 1 FROM form_claims c WHERE c.external_event_id=m.external_event_id AND c.event_date=m.event_date)",eventId);
+      if(opaque.some((row:any)=>row.key!==key))fail("claim_event_ambiguous",409);
+    } else {
+      eventId=randomUUID();const opens=new Date(day+"T00:00:00+09:00").toISOString(),closes=new Date(Date.parse(opens)+86400000).toISOString();
+      this.db.run("INSERT INTO events(id,title,starts_at,opens_at,closes_at,venue,capacity,source,external_id) VALUES(?,?,?,?,?,?,?,'analytics',?)",eventId,text(name,300),opens,opens,closes,"会場情報未登録",10000,key);
+      this.db.audit(system,"form_event_auto_create",eventId,null);
+    }
+    this.db.run("INSERT INTO form_event_mappings VALUES(?,?,?)",key,eventId,day);
+    this.db.audit(system,"form_event_auto_map",eventId,null);
+  }
   redeem(token: string, subject: string) {
     if (!/^[a-f0-9]{64}$/.test(token) || !/^[a-f0-9]{64}$/.test(subject))
       fail("claim_invalid", 404);
-    return this.db.sql.transaction(() => {
+    return this.redeemClaim(digest(token),subject);
+  }
+  redeemReserved(hash:string,subject:string,selection:string) {
+    if(!/^[a-f0-9]{64}$/.test(hash)||!/^[a-f0-9]{64}$/.test(subject))fail('claim_invalid',404);
+    if(this.db.row('SELECT subject_hash FROM form_claims WHERE token_hash=?',hash)?.subject_hash!==subject)fail('claim_used',409);
+    return this.redeemClaim(hash,subject,selection);
+  }
+  private redeemClaim(hash:string,subject:string,selection?:string) {
+    let choice:ConstructorParameters<typeof ClaimSelectionRequired>[0]|null=null;
+    const result=this.db.sql.transaction(() => {
       const claim = this.db.row(
         "SELECT * FROM form_claims WHERE token_hash=?",
-        digest(token),
+        hash,
       );
       if (!claim) fail("claim_pending", 409);
       if (claim.subject_hash && claim.subject_hash !== subject)
         fail("claim_used", 409);
+      if(!this.db.row("SELECT 1 FROM form_event_mappings WHERE external_event_id=? AND event_date=?",claim.external_event_id,claim.event_date)&&!this.db.row("SELECT 1 FROM events WHERE source='analytics' AND external_id=?",claim.external_event_id))this.autoReception(claim);
       const mapping = this.db.row(
         "SELECT event_id FROM form_event_mappings WHERE external_event_id=? AND event_date=?",
         claim.external_event_id,
         claim.event_date,
       );
-      const ev = mapping
+      let ev = mapping
         ? this.db.event(system, mapping.event_id)
         : this.db.row(
             "SELECT id,starts_at startsAt,closes_at closesAt,capacity,title FROM events WHERE source=? AND external_id=?",
@@ -167,6 +208,8 @@ export class FormClaims {
             claim.external_event_id,
           );
       if (!ev) fail("claim_event_pending", 409);
+      ev=this.db.event(system,this.db.canonicalEvent(ev.id));
+      if(ev.archived)fail("event_archived",409);
       if (japanDate(ev.startsAt) !== claim.event_date)
         fail("claim_event_date_mismatch", 409);
       if (Date.parse(ev.closesAt) <= Date.now()) fail("event_closed", 410);
@@ -174,17 +217,39 @@ export class FormClaims {
         "SELECT participant_id FROM line_identities WHERE subject_hash=?",
         subject,
       );
-      if (
-        claim.participant_id &&
-        identity?.participant_id !== claim.participant_id
-      )
-        fail("claim_used", 409);
+      // A server-imported accepted claim may already have its own participant.
+      // Ownership is enforced above by subject_hash, never by display name.
+      let participantId = claim.participant_id;
+      // Pending decisions are recorded in the existing audit trail, including
+      // imported claims which already have a participant before LINE redemption.
+      const pendingChoice=this.db.row("SELECT action FROM audit WHERE action IN ('form_claim_choice','form_claim_choice_complete') AND reason=? ORDER BY id DESC LIMIT 1",hash)?.action==='form_claim_choice';
+      if(!claim.subject_hash||!participantId||pendingChoice){
+        const own=this.db.rows(`SELECT DISTINCT p.id,p.name FROM participants p JOIN registrations r ON r.participant_id=p.id WHERE r.event_id=? AND p.id<>? AND r.status='planned' AND (EXISTS(SELECT 1 FROM form_claims c WHERE c.participant_id=p.id AND c.subject_hash=?) OR p.id IN(SELECT participant_id FROM line_identities WHERE subject_hash=?)) ORDER BY p.created_at,p.id`,ev.id,participantId||'',subject,subject);
+        if(!selection&&own.length){
+          this.db.run('UPDATE form_claims SET subject_hash=? WHERE token_hash=?',subject,hash);
+          if(!pendingChoice)this.db.audit(system,'form_claim_choice',ev.id,participantId||null,hash);
+          choice={claimHash:hash,eventId:ev.id,title:ev.title,startsAt:ev.startsAt,name:claim.name,people:own};
+          return null;
+        }
+        if(selection&&selection!=='new'){
+          if(!own.some(p=>p.id===selection))fail('claim_selection_invalid',403);
+          if(participantId&&participantId!==selection){
+            // Never erase an imported check-in or another claimed registration.
+            if(this.db.row('SELECT 1 FROM attendance WHERE event_id=? AND participant_id=?',ev.id,participantId)||this.db.row('SELECT 1 FROM form_claims WHERE participant_id=? AND token_hash<>? AND subject_hash IS NOT NULL',participantId,hash))fail('claim_selection_invalid',409);
+            this.db.run("UPDATE registrations SET status='cancelled' WHERE event_id=? AND participant_id=? AND status='planned'",ev.id,participantId);
+            this.db.audit(system,'form_claim_superseded',ev.id,participantId,hash);
+          }
+          participantId=selection;
+        }
+      }
+      if(!participantId&&this.db.row("SELECT 1 FROM participants p JOIN registrations r ON r.participant_id=p.id WHERE r.event_id=? AND p.name=? AND p.source='analytics' AND p.id<>? LIMIT 1",ev.id,claim.name,participantId||''))
+        fail('claim_registration_pending',409);
       const existing =
-        identity &&
+        participantId &&
         this.db.row(
           "SELECT status FROM registrations WHERE event_id=? AND participant_id=?",
           ev.id,
-          identity.participant_id,
+          participantId,
         );
       if (existing?.status === "cancelled") fail("registration_cancelled", 409);
       if (
@@ -195,7 +260,7 @@ export class FormClaims {
         ).n >= ev.capacity
       )
         fail("capacity_reached", 409);
-      if (!identity) {
+      if (!participantId) {
         const id = randomUUID();
         this.db.run(
           "INSERT INTO participants(id,name,source,created_at) VALUES(?,?,?,?)",
@@ -205,30 +270,36 @@ export class FormClaims {
           new Date().toISOString(),
         );
         this.db.run(
-          "INSERT INTO line_identities VALUES(?,?,?)",
+          "INSERT OR IGNORE INTO line_identities VALUES(?,?,?)",
           subject,
           id,
           new Date().toISOString(),
         );
         identity = { participant_id: id };
       }
+      const resolvedId = participantId || identity.participant_id;
+      if (!identity) this.db.run('INSERT INTO line_identities VALUES(?,?,?)',subject,resolvedId,new Date().toISOString());
       this.db.run(
         "INSERT OR IGNORE INTO registrations VALUES(?,?,'planned')",
         ev.id,
-        identity.participant_id,
+        resolvedId,
       );
       this.db.run(
         "UPDATE form_claims SET subject_hash=?,participant_id=? WHERE token_hash=?",
         subject,
-        identity.participant_id,
+        resolvedId,
         claim.token_hash,
       );
-      if (!claim.participant_id)
-        this.db.audit(system, "form_claim", ev.id, identity.participant_id);
+      if (!claim.subject_hash||!claim.participant_id)
+        this.db.audit(system, "form_claim", ev.id, resolvedId);
+      if(pendingChoice)this.db.audit(system,'form_claim_choice_complete',ev.id,resolvedId,hash);
       return {
         event: this.db.event(system, ev.id),
-        person: this.db.person(system, ev.id, identity.participant_id),
+        person: this.db.person(system, ev.id, resolvedId),
       };
     });
+    if(choice)throw new ClaimSelectionRequired(choice);
+    if(!result)fail('claim_invalid',404);
+    return result;
   }
 }
