@@ -1,5 +1,12 @@
 # Unity QR 2.0 implementation status
 
+## 2026-10-28 Past event visibility
+
+- Hide reception-ended events from the default event selector and event-management list. The global past-events checkbox restores access to the original participants/history; no automatic archival, deletion, schema or API changes. Existing Admin archive/restore remains available for tests/cancellations.
+- Expiry refresh commits selected event/details together, destroys the old scanner before switching and keeps the original event on failed/delayed detail reads. Unknown reception outcomes pause automatic/past-display switching; definitive 4xx rejection releases the retry key.
+- Regression cases cover same-day ending, overnight/boundary handling (Analytics helper), explicit past access/history retention, live expiry, failed next-event reads, invalid QR and uncertain-response retries, plus small-screen layout. Independent review found and verified both failure-path fixes. Details: docs/past-event-visibility.md.
+- Publish Analytics through its existing GitHub/Vercel connection. QR still requires the owner's existing Mac cloud:update with backup/restore verification; Cloudflare credentials, the QR password and the existing deployment state are not available in this environment. No real LINE sends or production DB writes were performed.
+
 ## 2026-10-27 Registration and cancellation fixes
 
 - Release evidence: QR PR19 merged as 26d632a; CI run40417150024 passed including Chromium/WebKit. Analytics PR27 merged as 1fc9aa4; Vercel production commit status succeeded. QR Cloudflare publication is still pending, so the production end-to-end cancellation flow is not claimed complete. Recovery source branches: backup/pre-registration-fixes-20261027 (QR 8b8fc22), backup/pre-qr-cancellation-20261027 (Analytics ce3abdd). These are source backups, not DB backups.
